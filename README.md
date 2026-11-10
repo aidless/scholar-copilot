@@ -52,6 +52,15 @@ flowchart LR
 
 ## 快速开始
 
+**零依赖先看一眼（30 秒，不用 Docker、不用 API 密钥）：**
+
+```bash
+bash scripts/demo_local.sh    # SQLite + fake provider，跑完 下单→大纲→逐章→支付→导出
+# 产物：/tmp/scholar-copilot-demo/毕业设计.docx（含 AI 披露表 + 免责声明 + 水印）
+```
+
+**完整形态：**
+
 ```bash
 cp .env.example .env          # 填 LLM_API_KEY 等
 docker compose up -d          # postgres + redis + backend + worker + frontend

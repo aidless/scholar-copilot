@@ -38,6 +38,13 @@ jobs:
         run: python -m scripts.export_openapi --check
       - name: Tests
         run: python -m pytest tests/ -q
+      # 「clone 即跑」的门：一键演示脚本必须真能跑通全流程并产出带披露表/水印的 docx。
+      # 用 PYTHON 指定当前解释器（脚本默认 python3，CI 里那是 setup-python 的同一个）。
+      - name: 一键演示脚本冒烟（下单→大纲→逐章→支付→导出）
+        env:
+          PYTHON: python
+          DEMO_OUT_DIR: ${{ runner.temp }}/sc-demo
+        run: bash ../scripts/demo_local.sh
 
   frontend:
     name: frontend build (node20)

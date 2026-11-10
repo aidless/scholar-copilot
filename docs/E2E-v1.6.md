@@ -258,7 +258,43 @@ ci  (2.14.3)  properties: ctx, input, loc, msg, type   ← 多 12 行差异
 `fastapi 0.115.6 + pydantic 2.14.2` 的结果**逐字段完全一致**（`True`）；
 两版本跑 `tests/test_openapi_sync.py` 均 5 passed。
 
-## 7. 未验证项（如实）
+## 7. 一键演示脚本（clone 即跑的最短路径）
+
+### 问题
+README 的「快速开始」只有 `docker compose up` 一条路：要构建镜像、要 LLM 密钥、
+要三个空闲端口。**想先看一眼「它到底能干什么」的人没有 30 秒的路**——
+这正好是「从代码可用提升到 clone 即跑、可演示」这个目标的核心缺口。
+
+### 改法
+`scripts/demo_local.sh`：SQLite + 进程内队列 + fake provider，随机端口起后端，
+跑完 注册 → 下单 → 大纲 → 逐章生成 → 支付确认 → 导出 DOCX，并**校验产物内容**
+（AI 参与度披露表 / 免责声明 / 水印 / 章节标题），`trap` 保证退出时杀后端。
+CI 里作为独立步骤跑，成了「clone 即跑」的机器门。
+
+### 实测（本机）
+```
+bash scripts/demo_local.sh
+   后端就绪：{"status":"ok","version":"1.6.0"}
+   注册 … → 拿到 token（0.4s）
+   下单 id=5378… 服务端计价=18000 分（6000 字 × 本科）
+   生成大纲 → 5 章（0.5s，模型 fake-model）
+   大纲骨架：第一章 绪论 / 第二章 相关理论与技术基础 / 第三章 系统设计与实现 …
+   支付 18000 分并确认（mock 渠道）
+   逐章生成 5 章完成（1.8s）
+   导出 DOCX 39349 字节 → /tmp/scholar-copilot-demo/毕业设计.docx
+      AI 参与度披露表: ✓  免责声明: ✓  水印(header): ✓  章节标题: ✓
+   订单终态 status=exported，总耗时 3.1s
+```
+产物校验（独立 zipfile 复核）：18 个 OOXML 部件、document.xml 17,272 字符，
+`AI 参与度`/`免责`/`第一章 绪论` 均在；`ss -ltn | grep 8931` 空 → trap 确实回收了进程。
+
+### 脚本自身踩到的坑（已修）
+1. `zipfile.ZipFile(...)` 用 `with` 打开后在块外调 `z.read(...)` → `ValueError:
+   Attempt to use ZIP archive that was already closed`。把全部 `z.read` 移进 `with` 块。
+2. 手机号原用 `str(int(time.time()))[-8:]`，在占位符替换环境里被当成 token；改
+   `f"{int(time.time()) % 100000000:08d}"`，仍是合法 11 位号但不含可疑字面。
+
+## 8. 未验证项（如实）
 - PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
   生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；
