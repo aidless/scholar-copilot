@@ -13,8 +13,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import (AdminAuditLog, AdminUser, GenerationJob, PaymentOrder,
-                      User, WritingOrder)
+from datetime import datetime, timezone
+
+from ..models import (AdminAuditLog, AdminUser, Commission, Distributor,
+                      DistributorTransfer, GenerationJob, PaymentOrder, Tenant,
+                      TenantConfig, User, WritingOrder)
 from ..security import make_token, verify_password
 from ..tenancy import CurrentUser, admin_user
 
@@ -142,3 +145,156 @@ async def audit_log(db: AsyncSession = Depends(get_db),
              "target": r.target, "detail": r.detail,
              "created_at": r.created_at.isoformat() if r.created_at else None}
             for r in rows]
+
+
+# ---------------------------------------------------------------- 租户（白标）
+@router.post("/tenants", status_code=201)
+async def create_tenant(body: dict, db: AsyncSession = Depends(get_db),
+                        admin: CurrentUser = Depends(admin_user)):
+    """新建白标租户（域名唯一）。密钥配置不进 API，由 DBA 直接维护加密列。"""
+    from .tenant import TenantConfigIn, TenantCreateIn
+
+    data = TenantCreateIn(**body)
+    exists = (await db.execute(select(Tenant).where(Tenant.domain == data.domain))).scalars().first()
+    if exists is not None:
+        raise HTTPException(409, "该域名已绑定租户")
+    tenant = Tenant(name=data.name, domain=data.domain, plan=data.plan)
+    db.add(tenant)
+    await db.flush()
+    db.add(TenantConfig(tenant_id=tenant.id))
+    await _audit(db, admin, "tenant.create", {"tenant_id": tenant.id},
+                 {"name": tenant.name, "domain": tenant.domain, "plan": tenant.plan})
+    await db.commit()
+    return {"id": tenant.id, "name": tenant.name, "domain": tenant.domain, "plan": tenant.plan}
+
+
+@router.get("/tenants")
+async def list_tenants(db: AsyncSession = Depends(get_db),
+                       admin: CurrentUser = Depends(admin_user)):
+    rows = (await db.execute(select(Tenant).order_by(Tenant.created_at.desc()))).scalars().all()
+    return [{"id": t.id, "name": t.name, "domain": t.domain, "plan": t.plan,
+             "status": t.status, "balance_cents": t.balance_cents,
+             "created_at": t.created_at.isoformat() if t.created_at else None} for t in rows]
+
+
+@router.put("/tenants/{tenant_id}/config")
+async def update_tenant_config(tenant_id: str, body: dict, db: AsyncSession = Depends(get_db),
+                               admin: CurrentUser = Depends(admin_user)):
+    from .tenant import TenantConfigIn
+
+    tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(404, "租户不存在")
+    data = TenantConfigIn(**body)
+    cfg = await db.get(TenantConfig, tenant_id)
+    if cfg is None:
+        cfg = TenantConfig(tenant_id=tenant_id)
+        db.add(cfg)
+    cfg.brand_color = data.brand_color
+    cfg.logo_url = data.logo_url
+    cfg.support_contact = data.support_contact
+    await _audit(db, admin, "tenant.config.update", {"tenant_id": tenant_id},
+                 {"brand_color": data.brand_color})
+    await db.commit()
+    return {"tenant_id": tenant_id, "brand_color": cfg.brand_color,
+            "logo_url": cfg.logo_url, "support_contact": cfg.support_contact}
+
+
+# ---------------------------------------------------------------- 分销代理
+class DistributorIn(BaseModel):
+    name: str = Field(min_length=2, max_length=64)
+    phone: str = Field(min_length=6, max_length=32)
+    code: str = Field(min_length=2, max_length=32)
+    rate_bps: int = Field(default=500, ge=0, le=5000)  # 万分比，0~50%
+    tenant_id: str = Field(default="primary", max_length=64)
+
+
+@router.post("/distributors", status_code=201)
+async def create_distributor(body: DistributorIn, db: AsyncSession = Depends(get_db),
+                             admin: CurrentUser = Depends(admin_user)):
+    exists = (await db.execute(select(Distributor).where(Distributor.code == body.code))).scalars().first()
+    if exists is not None:
+        raise HTTPException(409, "推广码已存在")
+    dist = Distributor(tenant_id=body.tenant_id, name=body.name, phone=body.phone,
+                       code=body.code, rate_bps=body.rate_bps)
+    db.add(dist)
+    await db.flush()
+    await _audit(db, admin, "distributor.create", {"distributor_id": dist.id},
+                 {"code": dist.code, "rate_bps": dist.rate_bps})
+    await db.commit()
+    return {"id": dist.id, "code": dist.code, "rate_bps": dist.rate_bps}
+
+
+@router.get("/distributors")
+async def list_distributors(db: AsyncSession = Depends(get_db),
+                            admin: CurrentUser = Depends(admin_user)):
+    rows = (await db.execute(select(Distributor).order_by(Distributor.created_at.desc()))).scalars().all()
+    return [{"id": d.id, "name": d.name, "phone": d.phone, "code": d.code,
+             "rate_bps": d.rate_bps, "balance_cents": d.balance_cents, "status": d.status,
+             "created_at": d.created_at.isoformat() if d.created_at else None} for d in rows]
+
+
+@router.get("/commissions")
+async def list_commissions(status: str | None = None, db: AsyncSession = Depends(get_db),
+                           admin: CurrentUser = Depends(admin_user)):
+    stmt = select(Commission).order_by(Commission.created_at.desc()).limit(300)
+    if status:
+        stmt = stmt.where(Commission.status == status)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{"id": c.id, "distributor_id": c.distributor_id, "order_id": c.order_id,
+             "order_amount_cents": c.order_amount_cents, "rate_bps": c.rate_bps,
+             "amount_cents": c.amount_cents, "status": c.status,
+             "created_at": c.created_at.isoformat() if c.created_at else None} for c in rows]
+
+
+@router.post("/commissions/{commission_id}/settle")
+async def settle_commission(commission_id: str, db: AsyncSession = Depends(get_db),
+                            admin: CurrentUser = Depends(admin_user)):
+    """结算佣金：pending → settled，并计入代理可提现余额（append 记账，不改历史）。"""
+    c = await db.get(Commission, commission_id)
+    if c is None:
+        raise HTTPException(404, "佣金记录不存在")
+    if c.status != "pending":
+        raise HTTPException(409, f"当前状态 {c.status} 不可结算")
+    dist = await db.get(Distributor, c.distributor_id)
+    c.status = "settled"
+    c.settled_at = datetime.now(timezone.utc)
+    if dist is not None:
+        dist.balance_cents = int(dist.balance_cents or 0) + int(c.amount_cents)
+    await _audit(db, admin, "commission.settle", {"commission_id": c.id},
+                 {"amount_cents": c.amount_cents, "distributor_id": c.distributor_id})
+    await db.commit()
+    return {"id": c.id, "status": c.status, "amount_cents": c.amount_cents}
+
+
+@router.get("/distributor-transfers")
+async def list_dist_transfers(status: str | None = None, db: AsyncSession = Depends(get_db),
+                              admin: CurrentUser = Depends(admin_user)):
+    stmt = select(DistributorTransfer).order_by(DistributorTransfer.created_at.desc()).limit(300)
+    if status:
+        stmt = stmt.where(DistributorTransfer.status == status)
+    rows = (await db.execute(stmt)).scalars().all()
+    return [{"id": r.id, "distributor_id": r.distributor_id, "amount_cents": r.amount_cents,
+             "status": r.status, "note": r.note,
+             "created_at": r.created_at.isoformat() if r.created_at else None,
+             "paid_at": r.paid_at.isoformat() if r.paid_at else None} for r in rows]
+
+
+@router.post("/distributor-transfers/{transfer_id}/{action}")
+async def audit_dist_transfer(transfer_id: str, action: str, db: AsyncSession = Depends(get_db),
+                              admin: CurrentUser = Depends(admin_user)):
+    """审核提现：action ∈ {pay, reject}。打款只登记状态，真实出款由财务线下执行。"""
+    if action not in ("pay", "reject"):
+        raise HTTPException(422, "action 必须是 pay 或 reject")
+    row = await db.get(DistributorTransfer, transfer_id)
+    if row is None:
+        raise HTTPException(404, "提现申请不存在")
+    if row.status != "requested":
+        raise HTTPException(409, f"当前状态 {row.status} 不可审核")
+    row.status = "paid" if action == "pay" else "rejected"
+    if action == "pay":
+        row.paid_at = datetime.now(timezone.utc)
+    await _audit(db, admin, f"distributor.transfer.{action}", {"transfer_id": row.id},
+                 {"amount_cents": row.amount_cents, "distributor_id": row.distributor_id})
+    await db.commit()
+    return {"id": row.id, "status": row.status}

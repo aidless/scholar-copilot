@@ -62,6 +62,34 @@ _FAKE_CHAPTER_MD = """### 1.1 研究背景与意义
 """
 
 
+_FAKE_PPT_SPEC = """# 主标题: 深度学习在学术写作中的应用
+# 副标题: 从大纲生成到引用核查的可溯源流程
+## 研究背景
+- 学术写作周期长，格式与引用负担重
+- 现有工具缺乏引用可核查性
+## 方法框架
+- 大纲生成：分章结构化约束
+- 逐章生成：目标字数与上下文摘要
+## 实验设置
+- 数据集：120 篇学位论文
+- 评价：陈述准确性、引用命中率
+## 结果
+- 引用命中率提升 32%
+- 平均写作时长下降 41%
+## 总结与展望
+- 引入人工复核回路
+- 扩展到多语言写作
+"""
+
+_FAKE_MERMAID = """```mermaid
+flowchart TD
+    A["用户下单"] --> B["生成大纲"]
+    B --> C["逐章生成"]
+    C --> D["引用核查"]
+    D --> E["导出 DOCX"]
+```"""
+
+
 class FakeProvider:
     """零网络依赖的确定性 Provider。"""
 
@@ -70,7 +98,14 @@ class FakeProvider:
     async def complete(self, prompt: str, *, system: str = "",
                        max_tokens: int = 4096, temperature: float = 0.7) -> LLMResult:
         del max_tokens, temperature
-        text = _FAKE_OUTLINE_MD if "大纲" in system else _FAKE_CHAPTER_MD
+        if "Mermaid" in system or "图表" in system:
+            text = _FAKE_MERMAID
+        elif "PPT" in system or "幻灯片" in system or "演示" in system:
+            text = _FAKE_PPT_SPEC
+        elif "大纲" in system:
+            text = _FAKE_OUTLINE_MD
+        else:
+            text = _FAKE_CHAPTER_MD
         return LLMResult(
             text=text,
             prompt_tokens=len(prompt) // 4,

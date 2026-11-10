@@ -227,3 +227,70 @@ CREATE TABLE transfer_records (
     note        text,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
+
+-- ============================================================
+-- v1.1 多租户白标 + 分销
+-- 纪律：租户渠道密钥（微信/短信等）一律放 tenant_configs 的 *_enc 加密列，
+-- 任何 API 只暴露 branding 白名单字段，绝不返回密钥（修复原产品 websiteInfo 泄露洞）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS tenants (
+    id            VARCHAR(32) PRIMARY KEY,
+    name          VARCHAR(64) NOT NULL,
+    domain        VARCHAR(255) NOT NULL UNIQUE,
+    plan          VARCHAR(16) NOT NULL DEFAULT 'free',
+    balance_cents INTEGER NOT NULL DEFAULT 0,
+    status        VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_configs (
+    tenant_id       VARCHAR(32) PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    brand_color     VARCHAR(7) NOT NULL DEFAULT '#111827',
+    logo_url        VARCHAR(255),
+    support_contact VARCHAR(128),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS distributors (
+    id            VARCHAR(32) PRIMARY KEY,
+    tenant_id     VARCHAR(64) NOT NULL DEFAULT 'primary',
+    name          VARCHAR(64) NOT NULL,
+    phone         VARCHAR(32) NOT NULL,
+    code          VARCHAR(32) NOT NULL UNIQUE,
+    rate_bps      INTEGER NOT NULL DEFAULT 500,   -- 万分比佣金率，500=5%
+    balance_cents INTEGER NOT NULL DEFAULT 0,
+    status        VARCHAR(16) NOT NULL DEFAULT 'active',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_distributors_tenant_id ON distributors(tenant_id);
+
+-- 佣金账：只能由「订单支付成功」事件生成，金额=服务端价×rate_bps，客户端不可传
+CREATE TABLE IF NOT EXISTS commissions (
+    id                 VARCHAR(32) PRIMARY KEY,
+    tenant_id          VARCHAR(64) NOT NULL,
+    distributor_id     VARCHAR(32) NOT NULL,
+    order_id           VARCHAR(32) NOT NULL,
+    order_amount_cents INTEGER NOT NULL,
+    rate_bps           INTEGER NOT NULL,
+    amount_cents       INTEGER NOT NULL,
+    status             VARCHAR(16) NOT NULL DEFAULT 'pending',  -- pending→settled
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    settled_at         TIMESTAMPTZ,
+    UNIQUE (order_id, distributor_id)                            -- 同一订单只算一次佣金
+);
+CREATE INDEX IF NOT EXISTS ix_commissions_distributor_id ON commissions(distributor_id);
+
+CREATE TABLE IF NOT EXISTS distributor_transfers (
+    id             VARCHAR(32) PRIMARY KEY,
+    tenant_id      VARCHAR(64) NOT NULL,
+    distributor_id VARCHAR(32) NOT NULL,
+    amount_cents   INTEGER NOT NULL,
+    status         VARCHAR(16) NOT NULL DEFAULT 'requested',    -- requested→paid/rejected
+    note           VARCHAR(200),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    paid_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_distributor_transfers_distributor_id ON distributor_transfers(distributor_id);
+
+ALTER TABLE writing_orders ADD COLUMN IF NOT EXISTS distributor_code VARCHAR(32);
+CREATE INDEX IF NOT EXISTS ix_writing_orders_distributor_code ON writing_orders(distributor_code);

@@ -43,7 +43,8 @@ class WritingOrder(Base):
     language = Column(String(8), nullable=False, default="zh")
     writing_type = Column(String(32), nullable=False, default="thesis")
     status = Column(String(32), nullable=False, default="draft")
-    price_cents = Column(Integer, nullable=False, default=0)  # 服务端算，前端传入无效
+    price_cents = Column(Integer, nullable=False, default=0)
+    distributor_code = Column(String(32), index=True)  # 推广码（订单成交后给代理计佣）  # 服务端算，前端传入无效
     paid_at = Column(DateTime)  # v0.5：支付成功时间；正文生成/改写需已支付（对照原产品付费流）
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
@@ -209,3 +210,80 @@ class AdminAuditLog(Base):
     target = Column(JSON)
     detail = Column(JSON)
     created_at = Column(DateTime, default=_now)
+
+
+class Tenant(Base):
+    """白标租户：域名 → 租户路由（原产品靠 websiteInfo 明文吐配置，这里只暴露 branding）。"""
+
+    __tablename__ = "tenants"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    name = Column(String(128), nullable=False)
+    domain = Column(String(255), nullable=False, unique=True)  # 含端口，可含子域
+    plan = Column(String(16), nullable=False, default="free")
+    balance_cents = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="active")
+    created_at = Column(DateTime, default=_now)
+
+
+class TenantConfig(Base):
+    """租户品牌/渠道配置。密钥类字段一律不进本表（加密列在 DB 侧由 DBA 管理）。
+
+    THREAT-MODEL 规则 3：任何对外 API 只能返回 branding 字段。
+    """
+
+    __tablename__ = "tenant_configs"
+
+    tenant_id = Column(String(32), primary_key=True)
+    brand_color = Column(String(16), nullable=False, default="#111827")
+    logo_url = Column(String(255))
+    support_contact = Column(String(128))
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class Distributor(Base):
+    """分销代理：校园代理/渠道商，佣金按 rate_bps 计（万分比，默认 5%）。"""
+
+    __tablename__ = "distributors"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    name = Column(String(64), nullable=False)
+    phone = Column(String(32), nullable=False)
+    code = Column(String(32), nullable=False, unique=True)  # 推广码
+    rate_bps = Column(Integer, nullable=False, default=500)
+    balance_cents = Column(Integer, nullable=False, default=0)
+    status = Column(String(16), nullable=False, default="active")
+    created_at = Column(DateTime, default=_now)
+
+
+class Commission(Base):
+    """佣金流水：订单支付成功时按服务端价 × rate_bps 生成（pending → settled）。"""
+
+    __tablename__ = "commissions"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    distributor_id = Column(String(32), nullable=False, index=True)
+    order_id = Column(String(32), nullable=False, index=True)
+    order_amount_cents = Column(Integer, nullable=False)
+    rate_bps = Column(Integer, nullable=False)
+    amount_cents = Column(Integer, nullable=False)  # 佣金 = order_amount × rate_bps // 10000
+    status = Column(String(16), nullable=False, default="pending")  # pending/settled/cancelled
+    created_at = Column(DateTime, default=_now)
+    settled_at = Column(DateTime)
+
+
+class DistributorTransfer(Base):
+    """代理提现申请：管理端审核后打款（audit 留痕）。"""
+
+    __tablename__ = "distributor_transfers"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    distributor_id = Column(String(32), nullable=False, index=True)
+    amount_cents = Column(Integer, nullable=False)
+    status = Column(String(16), nullable=False, default="requested")  # requested/paid/rejected
+    note = Column(String(255))
+    created_at = Column(DateTime, default=_now)
+    paid_at = Column(DateTime)

@@ -10,6 +10,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/workbench">写作台</a>
           <a href="/references">文献溯源</a>
           <a href="/review">文本体检</a>
+          <a href="/ppt">演示与图表</a>
+          <a href="/distributor">代理中心</a>
           <a href="/admin" className="text-neutral-400">管理台</a>
         </nav>
         {children}

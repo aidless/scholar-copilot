@@ -81,6 +81,7 @@ class OrderIn(BaseModel):
     word_count: int = Field(gt=0, le=200_000)
     language: str = "zh"
     writing_type: str = "thesis"
+    distributor_code: str | None = Field(default=None, max_length=32)  # 推广码（可选）
 
 
 @router.post("/orders")
@@ -93,6 +94,7 @@ async def create_order(body: OrderIn, db: AsyncSession = Depends(get_db),
         title=body.title, education=body.education,
         word_count=body.word_count, language=body.language,
         writing_type=body.writing_type,
+        distributor_code=body.distributor_code,
         status="draft",
         price_cents=price_cents(body.education, body.word_count),  # 服务端算，忽略客户端价
     )
@@ -312,6 +314,7 @@ async def rewrite_chapter(order_id: str, node_id: str, body: RewriteIn | None = 
 
 @router.post("/orders/{order_id}/export")
 async def export_order(order_id: str, profile: str = Query(default="default"),
+                       fmt: str = Query(default="docx", alias="format", pattern="^(docx|pdf)$"),
                        db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(current_user)):
     order = await _get_owned_order(db, user, order_id)
@@ -341,11 +344,21 @@ async def export_order(order_id: str, profile: str = Query(default="default"),
         except KeyError:
             raise HTTPException(
                 422, f"未知格式 profile：{profile}；可用值见 GET /formatting/profiles") from None
+    if fmt == "pdf":
+        from ..export.pdf import docx_bytes_to_pdf
+        try:
+            data = docx_bytes_to_pdf(data)
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from None
+        media = "application/pdf"
+        filename = quote(f"{order.title}.pdf")
+    else:
+        media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        filename = quote(f"{order.title}.docx")
     order.status = "exported"
     await db.commit()
-    filename = quote(f"{order.title}.docx")
     return Response(
         content=data,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_type=media,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )

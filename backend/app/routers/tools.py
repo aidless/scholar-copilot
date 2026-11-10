@@ -14,6 +14,11 @@ from ..llm.registry import get_provider
 from ..ratelimit import rate_limit_llm
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt
 from ..prompts.safety import wrap_untrusted
+from ..prompts.diagram_prompts import DIAGRAM_SYSTEM_PROMPT, build_diagram_user_prompt
+from ..prompts.ppt_prompts import PPT_SYSTEM_PROMPT, build_ppt_user_prompt
+from ..export.pptx_builder import build_pptx, parse_ppt_spec
+from fastapi import Response
+from urllib.parse import quote
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -104,3 +109,53 @@ async def detect(body: DetectIn):
     if repeats:
         report["advice"].append(f"发现重复片段（如「{repeats[0]['gram'][:12]}…」×{repeats[0]['count']}），建议改写车轱辘话")
     return report
+
+
+class PptIn(BaseModel):
+    topic: str = Field(min_length=2, max_length=200)
+    audience: str = Field(default="学术评审", max_length=64)
+    pages: int = Field(default=10, ge=4, le=20)
+    wait: bool = True
+
+
+@router.post("/ppt", dependencies=[Depends(rate_limit_llm)])
+async def make_ppt(body: PptIn):
+    """按主题生成 PPTX（LLM 出结构化大纲 → python-pptx 渲染，可编辑）。"""
+    provider = get_provider()
+    result = await provider.complete(
+        build_ppt_user_prompt(body.topic, body.audience, body.pages),
+        system=PPT_SYSTEM_PROMPT, max_tokens=2048,
+    )
+    try:
+        spec = parse_ppt_spec(result.text)
+    except ValueError as exc:
+        raise HTTPException(502, f"大纲解析失败，请重试：{exc}") from None
+    data = build_pptx(spec)
+    fname = quote(f"{spec['title'][:40]}.pptx")
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{fname}"},
+    )
+
+
+class DiagramIn(BaseModel):
+    description: str = Field(min_length=4, max_length=2000)
+    kind: str = Field(default="flowchart", pattern="^(flowchart|sequence|architecture)$")
+
+
+@router.post("/diagram", dependencies=[Depends(rate_limit_llm)])
+async def make_diagram(body: DiagramIn):
+    """自然语言 → Mermaid 代码（前端自行渲染；不返回图片，避免黑盒）。"""
+    provider = get_provider()
+    result = await provider.complete(
+        build_diagram_user_prompt(wrap_untrusted(body.description, "图表描述"), body.kind),
+        system=DIAGRAM_SYSTEM_PROMPT, max_tokens=1200,
+    )
+    text = result.text.strip()
+    m = re.search(r"```mermaid\s*(.+?)```", text, re.S)
+    code = (m.group(1) if m else text).strip()
+    if not re.search(r"^(flowchart|graph|sequenceDiagram|classDiagram)", code):
+        raise HTTPException(502, "模型未返回合法 Mermaid 代码，请重试或换个描述")
+    return {"mermaid": code, "kind": body.kind, "model": result.model,
+            "tokens_in": result.prompt_tokens, "tokens_out": result.completion_tokens}

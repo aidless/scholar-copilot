@@ -7,10 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 
 from . import tenancy
-from .routers import (admin, auth, billing, formatting, jobs, payments,
-                      references, review, tools, writing)
+from .routers import (admin, auth, billing, distributor, formatting, jobs,
+                      payments, references, review, tenant, tools, writing)
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 OPENAPI_PATH = "/docs"
 
 
@@ -58,6 +58,8 @@ def create_app() -> FastAPI:
     app.include_router(writing.router)
     app.include_router(references.router)
     app.include_router(review.router)
+    app.include_router(tenant.router)
+    app.include_router(distributor.router)
     app.include_router(billing.router)
     app.include_router(admin.router)
     app.include_router(jobs.router)

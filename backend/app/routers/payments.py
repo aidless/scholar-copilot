@@ -23,6 +23,32 @@ from ..tenancy import CurrentUser, current_user, ownership_filter
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
+
+async def _accrue_commission(db: AsyncSession, order: WritingOrder) -> dict | None:
+    """订单首次支付成功时，按服务端价 × 代理 rate_bps 生成一条 pending 佣金（幂等）。"""
+    from sqlalchemy import select as _select
+
+    from ..models import Commission, Distributor
+
+    if not order.distributor_code:
+        return None
+    dist = (await db.execute(
+        _select(Distributor).where(Distributor.code == order.distributor_code,
+                                   Distributor.status == "active")
+    )).scalars().first()
+    if dist is None:
+        return None
+    exists = (await db.execute(
+        _select(Commission).where(Commission.order_id == order.id)
+    )).scalars().first()
+    if exists is not None:
+        return {"commission_cents": exists.amount_cents, "duplicate": True}
+    amount = int(order.price_cents * dist.rate_bps // 10000)
+    db.add(Commission(tenant_id=order.tenant_id, distributor_id=dist.id,
+                      order_id=order.id, order_amount_cents=order.price_cents,
+                      rate_bps=dist.rate_bps, amount_cents=amount))
+    return {"commission_cents": amount, "distributor_id": dist.id}
+
 _PAY_METHODS = ("wechat", "alipay")
 
 
@@ -108,6 +134,7 @@ async def confirm_payment(serial_no: str, db: AsyncSession = Depends(get_db),
     order = await db.get(WritingOrder, payment.order_id)
     if order is not None:
         order.paid_at = payment.paid_at
+        await _accrue_commission(db, order)
     await db.commit()
     return {**_payment_out(payment), "order_paid": order is not None}
 

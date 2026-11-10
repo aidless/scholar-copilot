@@ -70,3 +70,39 @@ npm install && npm run dev       # http://localhost:3000
 - **正文生成 402**：订单未支付——先 `POST /payments/orders/{id}` 再 `confirm`（大纲阶段免费）。
 - **检索 502**：OpenAlex/Crossref 均不可达（含限流）；换关键词重试，或稍后再试。
 - **导出报「还有 N 个章节未完成」**：先把所有章节生成/保存到 done 状态。
+
+
+## v1.1 新增：白标租户与分销
+
+### 1. 迁移
+```bash
+cd backend && SC_DATABASE_URL=postgresql+asyncpg://... alembic upgrade head
+```
+新增 `tenants / tenant_configs / distributors / commissions / distributor_transfers` 五表与
+`writing_orders.distributor_code` 列。
+
+### 2. 白标租户（按域名解析）
+1. 管理端建租户：`POST /admin/tenants {"name":"云笔学术","domain":"lab.example.com","plan":"pro"}`
+2. 配置品牌：`PUT /admin/tenants/{id}/config {"brand_color":"#1d4ed8","logo_url":"...","support_contact":"kf@example.com"}`
+3. 前端启动时拉 `GET /tenant/branding`（Host 自动识别；未绑定的域名回退 primary）。
+   该接口**只返回品牌白名单字段**，渠道密钥一律不进 API。
+4. 生产需在 nginx 里把各租户域名指到同一后端（`proxy_set_header Host $host;` 必须保留）。
+
+### 3. 分销代理
+1. 建代理：`POST /admin/distributors {"name":"校园代理A","phone":"138...","code":"CAMPUS01","rate_bps":500}`
+   注意 `rate_bps` 是万分比（500 = 5%）。
+2. 下单时用户可带 `distributor_code`；订单**支付成功**才生成 pending 佣金（同订单幂等）。
+3. 结算：`POST /admin/commissions/{id}/settle` → 计入代理可提现余额。
+4. 代理登录 `POST /distributor/login {code, phone}` → 查佣金 → `POST /distributor/transfers` 申请提现。
+5. 平台审核：`POST /admin/distributor-transfers/{id}/pay|reject`（只登记状态，真实出款由财务线下执行）。
+   所有管理动作写入 `admin_audit_log`。
+
+### 4. PPT / 图表 / PDF
+- `POST /tools/ppt {"topic","audience","pages"}` → 直接下载 .pptx（可编辑）。
+- `POST /tools/diagram {"description","kind":"flowchart|sequence|architecture"}` → 返回 Mermaid 源码。
+- 导出 PDF 依赖宿主机 LibreOffice：`apt install libreoffice-writer`；缺失时自动 502 并提示改用 docx。
+
+### 5. 常见问题
+- **branding 返回 primary**：Host 头没传或域名未在 tenants 表登记（检查反向代理是否保留 Host）。
+- **代理提现 400**：可提现 = 已结算佣金 − 已申请/已付，先 settle 佣金。
+- **PDF 502**：`which soffice` 为空，装 LibreOffice；或改用 `format=docx`。

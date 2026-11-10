@@ -3,9 +3,12 @@
 逆向教训：原产品 orderInfo 只验「是否登录」，不验属主/租户，任何登录用户可读任意租户订单。
 这里的两个 FastAPI 依赖把「属主 + 租户」做成所有资源路由的强制参数，漏写就是类型错误。
 """
+import time
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_db
 from .security import parse_token
@@ -39,11 +42,44 @@ async def admin_user(user: CurrentUser = Depends(current_user)) -> CurrentUser:
     return user
 
 
-async def tenant_scope(request: Request) -> str:
-    """按 Host 头解析租户。MVP 单租户时返回 primary；多租户时查 tenants 表。"""
-    host = request.headers.get("host", "")
-    # TODO(v0.5): SELECT id FROM tenants WHERE domain = :host，未命中回退主域并记 audit_log
-    return host or "primary"
+_HOST_CACHE: dict[str, tuple[float, str]] = {}
+_HOST_TTL = 60.0
+
+
+async def resolve_tenant(host: str, db: AsyncSession) -> str:
+    """Host → tenant_id：查 tenants.domain（含端口/子域），未命中回退 "primary"。
+
+    60 秒进程内缓存（白标域名不常变）；命中失败也缓存，避免每请求打库。
+    """
+    key = (host or "").lower()
+    hit = _HOST_CACHE.get(key)
+    if hit and time.time() - hit[0] < _HOST_TTL:
+        return hit[1]
+    from .models import Tenant  # 延迟导入避免循环
+
+    candidates = [key]
+    if ":" in key:
+        candidates.append(key.split(":")[0])
+    row = None
+    if key:
+        row = (await db.execute(
+            select(Tenant).where(Tenant.domain.in_(candidates), Tenant.status == "active")
+        )).scalars().first()
+    tenant_id = row.id if row else "primary"
+    _HOST_CACHE[key] = (time.time(), tenant_id)
+    return tenant_id
+
+
+async def tenant_scope(request: Request, db: AsyncSession = Depends(get_db)) -> str:
+    """按 Host 头解析租户（多租户白标路由入口）。"""
+    return await resolve_tenant(request.headers.get("host", ""), db)
+
+
+async def distributor_user(user: CurrentUser = Depends(current_user)) -> CurrentUser:
+    """分销代理端依赖：token role 必须是 distributor。"""
+    if user.role != "distributor":
+        raise HTTPException(403, "需要代理权限")
+    return user
 
 
 def ownership_filter(query, model, user: CurrentUser):
