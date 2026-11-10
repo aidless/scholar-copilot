@@ -22,7 +22,7 @@ def upgrade() -> None:
     sa.Column('action', sa.String(length=64), nullable=False),
     sa.Column('target', sa.JSON(), nullable=True),
     sa.Column('detail', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_admin_audit_log_admin_id'), 'admin_audit_log', ['admin_id'], unique=False)
@@ -33,7 +33,7 @@ def upgrade() -> None:
     sa.Column('pass_hash', sa.String(length=128), nullable=False),
     sa.Column('role', sa.String(length=16), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('login_name')
     )
@@ -50,8 +50,8 @@ def upgrade() -> None:
     sa.Column('tokens_in', sa.Integer(), nullable=False),
     sa.Column('tokens_out', sa.Integer(), nullable=False),
     sa.Column('model', sa.String(length=64), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('finished_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('finished_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_generation_jobs_order_id'), 'generation_jobs', ['order_id'], unique=False)
@@ -68,7 +68,7 @@ def upgrade() -> None:
     sa.Column('content_md', sa.Text(), nullable=True),
     sa.Column('word_count', sa.Integer(), nullable=False),
     sa.Column('ai_level', sa.String(length=1), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_chapters_order_node', 'order_chapters', ['order_id', 'node_id'], unique=True)
@@ -80,7 +80,7 @@ def upgrade() -> None:
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('content_md', sa.Text(), nullable=False),
     sa.Column('tree_json', sa.JSON(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_order_outlines_order_id'), 'order_outlines', ['order_id'], unique=False)
@@ -94,8 +94,8 @@ def upgrade() -> None:
     sa.Column('pay_method', sa.String(length=16), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('provider_ref', sa.String(length=255), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('paid_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('serial_no')
     )
@@ -111,7 +111,7 @@ def upgrade() -> None:
     sa.Column('is_usage', sa.Boolean(), nullable=False),
     sa.Column('reason', sa.String(length=255), nullable=False),
     sa.Column('order_id', sa.String(length=32), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_quota_ledger_user_id'), 'quota_ledger', ['user_id'], unique=False)
@@ -130,7 +130,7 @@ def upgrade() -> None:
     sa.Column('cited_by', sa.Integer(), nullable=True),
     sa.Column('verify_state', sa.String(length=16), nullable=False),
     sa.Column('verify_evidence', sa.JSON(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_reference_items_order_id'), 'reference_items', ['order_id'], unique=False)
@@ -139,7 +139,7 @@ def upgrade() -> None:
     sa.Column('tenant_id', sa.String(length=64), nullable=False),
     sa.Column('phone', sa.String(length=20), nullable=False),
     sa.Column('password_hash', sa.String(length=128), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_users_phone'), 'users', ['phone'], unique=True)
@@ -155,9 +155,9 @@ def upgrade() -> None:
     sa.Column('writing_type', sa.String(length=32), nullable=False),
     sa.Column('status', sa.String(length=32), nullable=False),
     sa.Column('price_cents', sa.Integer(), nullable=False),
-    sa.Column('paid_at', sa.DateTime(), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_orders_tenant_owner', 'writing_orders', ['tenant_id', 'owner_id'], unique=False)

@@ -16,13 +16,14 @@ compose 起来的东西：
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
-| postgres | 5432 | 首次启动执行 `deploy/init.sql`；数据在 `pgdata` 卷 |
+| postgres | 5432 | 数据在 `pgdata` 卷；**表由 backend 启动时 `alembic upgrade head` 建**（`deploy/init.sql` 只是设计蓝本，不再作为 entrypoint 执行） |
 | redis | 6379 | arq 任务队列（`SC_TASK_QUEUE=arq`） |
-| backend | 8000 | FastAPI，`SC_DB_AUTO_CREATE=true` 演示模式启动建表；提交生成任务后入队 |
+| backend | 8000 | FastAPI，启动命令先 `alembic upgrade head` 再起服务（`SC_DB_AUTO_CREATE=false`，单一 schema 真相源）；生成任务入队 |
 | worker | — | `arq app.tasks.worker.WorkerSettings`，消费大纲/逐章/改写任务（无 HTTP 端口） |
 | frontend | 3000 | Next.js 15（`NEXT_PUBLIC_API_BASE` 指向后端） |
 
-> 演示模式用 `SC_DB_AUTO_CREATE=true` 免去迁移；**生产必须关掉并跑 alembic**（见 §3）。
+> schema 只有一条真相源：alembic。`SC_DB_AUTO_CREATE` 默认 false，仅本地零依赖试跑（SQLite）时才置 true。
+> 改模型后必须补迁移，否则 `tests/test_migrations_match_models.py` 会红（空库真跑迁移再逐列比对）。
 
 ## 2. 本地开发
 

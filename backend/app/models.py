@@ -26,7 +26,7 @@ class User(Base):
     tenant_id = Column(String(64), nullable=False, default="primary", index=True)
     phone = Column(String(20), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class WritingOrder(Base):
@@ -45,9 +45,9 @@ class WritingOrder(Base):
     status = Column(String(32), nullable=False, default="draft")
     price_cents = Column(Integer, nullable=False, default=0)
     distributor_code = Column(String(32), index=True)  # 推广码（订单成交后给代理计佣）  # 服务端算，前端传入无效
-    paid_at = Column(DateTime)  # v0.5：支付成功时间；正文生成/改写需已支付（对照原产品付费流）
-    created_at = Column(DateTime, default=_now)
-    updated_at = Column(DateTime, default=_now, onupdate=_now)
+    paid_at = Column(DateTime(timezone=True))  # v0.5：支付成功时间；正文生成/改写需已支付（对照原产品付费流）
+    created_at = Column(DateTime(timezone=True), default=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     __table_args__ = (
         Index("ix_orders_tenant_owner", "tenant_id", "owner_id"),
@@ -65,7 +65,7 @@ class OrderOutline(Base):
     version = Column(Integer, nullable=False)
     content_md = Column(Text, nullable=False)
     tree_json = Column(JSON, nullable=False)  # outline_parser 的树结构
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class OrderChapter(Base):
@@ -88,7 +88,7 @@ class OrderChapter(Base):
     content_md = Column(Text)
     word_count = Column(Integer, nullable=False, default=0)
     ai_level = Column(String(1), nullable=False, default="C")
-    updated_at = Column(DateTime, default=_now, onupdate=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     __table_args__ = (
         Index("ix_chapters_order_node", "order_id", "node_id", unique=True),
@@ -112,8 +112,8 @@ class GenerationJob(Base):
     tokens_in = Column(Integer, nullable=False, default=0)
     tokens_out = Column(Integer, nullable=False, default=0)
     model = Column(String(64))
-    created_at = Column(DateTime, default=_now)
-    finished_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    finished_at = Column(DateTime(timezone=True))
 
 
 class QuotaLedger(Base):
@@ -133,7 +133,7 @@ class QuotaLedger(Base):
     is_usage = Column(Boolean, nullable=False, default=True)
     reason = Column(String(255), nullable=False)
     order_id = Column(String(32))
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
         Index("ix_quota_user_kind", "user_id", "kind"),
@@ -158,7 +158,7 @@ class ReferenceItem(Base):
     cited_by = Column(Integer, default=0)
     verify_state = Column(String(16), nullable=False, default="unverified")
     verify_evidence = Column(JSON)
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class PaymentOrder(Base):
@@ -178,8 +178,8 @@ class PaymentOrder(Base):
     pay_method = Column(String(16), nullable=False)  # wechat / alipay
     status = Column(String(16), nullable=False, default="pending")
     provider_ref = Column(String(255))
-    created_at = Column(DateTime, default=_now)
-    paid_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    paid_at = Column(DateTime(timezone=True))
 
 
 class AdminUser(Base):
@@ -196,7 +196,7 @@ class AdminUser(Base):
     pass_hash = Column(String(128), nullable=False)
     role = Column(String(16), nullable=False, default="operator")
     status = Column(String(16), nullable=False, default="active")
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class AdminAuditLog(Base):
@@ -209,7 +209,7 @@ class AdminAuditLog(Base):
     action = Column(String(64), nullable=False)  # payment.confirm / quota.adjust / ...
     target = Column(JSON)
     detail = Column(JSON)
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class Tenant(Base):
@@ -223,7 +223,7 @@ class Tenant(Base):
     plan = Column(String(16), nullable=False, default="free")
     balance_cents = Column(Integer, nullable=False, default=0)
     status = Column(String(16), nullable=False, default="active")
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class TenantConfig(Base):
@@ -238,7 +238,7 @@ class TenantConfig(Base):
     brand_color = Column(String(16), nullable=False, default="#111827")
     logo_url = Column(String(255))
     support_contact = Column(String(128))
-    updated_at = Column(DateTime, default=_now, onupdate=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class Distributor(Base):
@@ -254,7 +254,7 @@ class Distributor(Base):
     rate_bps = Column(Integer, nullable=False, default=500)
     balance_cents = Column(Integer, nullable=False, default=0)
     status = Column(String(16), nullable=False, default="active")
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class Commission(Base):
@@ -270,8 +270,8 @@ class Commission(Base):
     rate_bps = Column(Integer, nullable=False)
     amount_cents = Column(Integer, nullable=False)  # 佣金 = order_amount × rate_bps // 10000
     status = Column(String(16), nullable=False, default="pending")  # pending/settled/cancelled
-    created_at = Column(DateTime, default=_now)
-    settled_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    settled_at = Column(DateTime(timezone=True))
 
 
 class DistributorTransfer(Base):
@@ -285,8 +285,8 @@ class DistributorTransfer(Base):
     amount_cents = Column(Integer, nullable=False)
     status = Column(String(16), nullable=False, default="requested")  # requested/paid/rejected
     note = Column(String(255))
-    created_at = Column(DateTime, default=_now)
-    paid_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    paid_at = Column(DateTime(timezone=True))
 
 
 class SmsCode(Base):
@@ -302,10 +302,10 @@ class SmsCode(Base):
     phone = Column(String(32), nullable=False, index=True)
     scene = Column(String(16), nullable=False, default="register")  # register/login
     code_hash = Column(String(64), nullable=False)                   # sha256(phone:scene:code)
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     attempts = Column(Integer, nullable=False, default=0)
     consumed = Column(Boolean, nullable=False, default=False)
-    created_at = Column(DateTime, default=_now)
+    created_at = Column(DateTime(timezone=True), default=_now)
 
 
 class WechatScene(Base):
@@ -318,5 +318,5 @@ class WechatScene(Base):
     status = Column(String(16), nullable=False, default="pending")  # pending/confirmed/expired
     user_id = Column(String(32))
     tenant_id = Column(String(64), nullable=False, default="primary")
-    created_at = Column(DateTime, default=_now)
-    confirmed_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    confirmed_at = Column(DateTime(timezone=True))

@@ -17,27 +17,31 @@ OPENAPI_PATH = "/docs"
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        from .db import _engine_and_session
+        import app.models  # noqa: F401——注册 metadata
+
         if settings.db_auto_create:
-            from .db import _engine_and_session, Base
-            import app.models  # noqa: F401——注册 metadata
+            from .db import Base
 
             engine, _ = _engine_and_session()
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            # 初始管理员（线下交付语义：密码仅从环境注入；空则不创建）
-            if settings.admin_initial_password:
-                from .models import AdminUser
-                from .security import hash_password
-                from sqlalchemy import select, func
-                async with _engine_and_session()[1]() as db:
-                    existing = (await db.execute(
-                        select(func.count()).select_from(AdminUser))).scalar()
-                    if not existing:
-                        db.add(AdminUser(
-                            tenant_id=None, login_name=settings.admin_initial_login,
-                            pass_hash=hash_password(settings.admin_initial_password),
-                            role="superadmin"))
-                        await db.commit()
+
+        # 初始管理员：与建表方式解耦（alembic 建表时也要能引导）。
+        # 线下交付语义：密码只从环境注入，空则不创建；已存在则跳过（幂等）。
+        if settings.admin_initial_password:
+            from .models import AdminUser
+            from .security import hash_password
+            from sqlalchemy import select, func
+            async with _engine_and_session()[1]() as db:
+                existing = (await db.execute(
+                    select(func.count()).select_from(AdminUser))).scalar()
+                if not existing:
+                    db.add(AdminUser(
+                        tenant_id=None, login_name=settings.admin_initial_login,
+                        pass_hash=hash_password(settings.admin_initial_password),
+                        role="superadmin"))
+                    await db.commit()
         yield
 
     app = FastAPI(title="Scholar Copilot", version=VERSION,

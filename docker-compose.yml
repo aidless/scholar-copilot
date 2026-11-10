@@ -6,8 +6,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scholar}
       POSTGRES_DB: scholar
     volumes:
-      - ./deploy/init.sql:/docker-entrypoint-initdb.d/init.sql
       - pgdata:/var/lib/postgresql/data
+      # 建表由 backend 容器启动时跑 alembic upgrade head 完成（单一 schema 真相源）；
+      # deploy/init.sql 保留为设计蓝本（含 R1-R4 约束注释），不再作为 entrypoint 脚本执行。
     ports: ["5432:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scholar -d scholar"]
@@ -24,13 +25,15 @@ services:
       retries: 10
   backend:
     build: ./backend
+    # 迁移先于服务：容器内 alembic upgrade head 幂等，避免 create_all 与迁移双真相源
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     env_file:
       - path: .env
         required: false
     environment:
       SC_DATABASE_URL: postgresql+asyncpg://scholar:${POSTGRES_PASSWORD:-scholar}@postgres:5432/scholar
       SC_REDIS_URL: redis://redis:6379/0
-      SC_DB_AUTO_CREATE: "true"   # 演示模式：启动建表；生产改为 false 并跑 alembic
+      SC_DB_AUTO_CREATE: "false"  # 表由上面的 alembic upgrade head 建，不靠 create_all
       SC_TASK_QUEUE: arq          # 生成任务交 worker 容器（也可改回 inline 单进程演示）
       SC_PRIMARY_DOMAIN: localhost:3000
       SC_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000

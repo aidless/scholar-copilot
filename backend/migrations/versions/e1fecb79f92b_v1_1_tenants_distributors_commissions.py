@@ -25,8 +25,8 @@ def upgrade() -> None:
     sa.Column('rate_bps', sa.Integer(), nullable=False),
     sa.Column('amount_cents', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('settled_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('settled_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_commissions_distributor_id'), 'commissions', ['distributor_id'], unique=False)
@@ -39,8 +39,8 @@ def upgrade() -> None:
     sa.Column('amount_cents', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('note', sa.String(length=255), nullable=True),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('paid_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_distributor_transfers_distributor_id'), 'distributor_transfers', ['distributor_id'], unique=False)
@@ -54,7 +54,7 @@ def upgrade() -> None:
     sa.Column('rate_bps', sa.Integer(), nullable=False),
     sa.Column('balance_cents', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code')
     )
@@ -64,7 +64,7 @@ def upgrade() -> None:
     sa.Column('brand_color', sa.String(length=16), nullable=False),
     sa.Column('logo_url', sa.String(length=255), nullable=True),
     sa.Column('support_contact', sa.String(length=128), nullable=True),
-    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('tenant_id')
     )
     op.create_table('tenants',
@@ -74,7 +74,7 @@ def upgrade() -> None:
     sa.Column('plan', sa.String(length=16), nullable=False),
     sa.Column('balance_cents', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('domain')
     )

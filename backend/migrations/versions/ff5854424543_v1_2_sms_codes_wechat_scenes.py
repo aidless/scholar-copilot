@@ -21,10 +21,10 @@ def upgrade() -> None:
     sa.Column('phone', sa.String(length=32), nullable=False),
     sa.Column('scene', sa.String(length=16), nullable=False),
     sa.Column('code_hash', sa.String(length=64), nullable=False),
-    sa.Column('expires_at', sa.DateTime(), nullable=False),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('attempts', sa.Integer(), nullable=False),
     sa.Column('consumed', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_sms_codes_phone'), 'sms_codes', ['phone'], unique=False)
@@ -34,8 +34,8 @@ def upgrade() -> None:
     sa.Column('status', sa.String(length=16), nullable=False),
     sa.Column('user_id', sa.String(length=32), nullable=True),
     sa.Column('tenant_id', sa.String(length=64), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=True),
-    sa.Column('confirmed_at', sa.DateTime(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('confirmed_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_wechat_scenes_scene'), 'wechat_scenes', ['scene'], unique=True)
