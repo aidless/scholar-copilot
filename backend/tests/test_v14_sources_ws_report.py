@@ -136,3 +136,104 @@ def test_admin_report_summary():
                   "jobs_by_status", "tokens_in", "tokens_out"):
             assert k in body
         assert client.get("/admin/reports/summary?days=0", headers=auth(adm)).status_code == 422
+
+
+# ---------------------------------------------------------------- PubMed 第四源（v1.6）
+def test_pubmed_norm_extracts_doi_and_year():
+    """esummary 的 doi 在 articleids 里、年份在 pubdate 前四位——两处都容易取错。"""
+    from app.litsearch import _norm_pubmed
+
+    item = {
+        "uid": "12345",
+        "title": "A Study of Things.",
+        "pubdate": "2021 Mar 15",
+        "fulljournalname": "Journal of Things",
+        "authors": [{"name": "Zhang San"}, {"name": "Li Si"}],
+        "articleids": [
+            {"idtype": "pubmed", "value": "12345"},
+            {"idtype": "doi", "value": "10.1000/xyz"},
+        ],
+    }
+    out = _norm_pubmed(item)
+    assert out["title"] == "A Study of Things"          # 去掉句末点
+    assert out["year"] == 2021
+    assert out["doi"] == "10.1000/xyz"                  # 挑 doi 而不是 pubmed id
+    assert out["url"] == "https://doi.org/10.1000/xyz"
+    assert out["venue"] == "Journal of Things"
+    assert out["source"] == "pubmed"
+    assert out["authors"] == ["Zhang San", "Li Si"]
+
+
+def test_pubmed_norm_without_doi_falls_back_to_pubmed_url():
+    from app.litsearch import _norm_pubmed
+
+    out = _norm_pubmed({"uid": "999", "title": "No DOI Paper", "pubdate": "2019",
+                        "authors": [], "articleids": []})
+    assert out["doi"] == ""
+    assert out["url"] == "https://pubmed.ncbi.nlm.nih.gov/999/"
+    assert out["year"] == 2019
+
+
+def test_pubmed_norm_skips_empty_title():
+    from app.litsearch import _norm_pubmed
+
+    assert _norm_pubmed({"uid": "1", "title": "  "}) is None
+    assert _norm_pubmed({"uid": "2"}) is None
+
+
+def test_pubmed_passes_api_key_and_email(monkeypatch):
+    """配了 key/email 就该带上（NCBI 用它提额，匿名 3 req/s 容易被限）。"""
+    from app import litsearch
+    from app.config import settings
+
+    seen = []
+
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self): return {"esearchresult": {"idlist": []}}
+
+    class FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, params=None, headers=None):
+            seen.append((url, params or {}))
+            return FakeResp()
+
+    monkeypatch.setattr(settings, "pubmed_api_key", "PKEY")
+    monkeypatch.setattr(settings, "pubmed_email", "lab@example.com")
+    monkeypatch.setattr(litsearch.httpx, "AsyncClient", FakeClient)
+
+    import asyncio
+    asyncio.run(litsearch._pubmed("q", 5))
+    assert len(seen) == 1  # esearch 无结果就不再打 esummary
+    url, params = seen[0]
+    assert "esearch" in url
+    assert params["api_key"] == "PKEY" and params["email"] == "lab@example.com"
+    assert params["db"] == "pubmed" and params["retmode"] == "json"
+
+
+def test_pubmed_disabled_is_not_in_chain(monkeypatch):
+    """pubmed_enabled=false 时不该被调用（有些部署只想要 DOI 库，不想拉医学库）。"""
+    from app import litsearch
+    from app.config import settings
+
+    called = {"pubmed": False}
+
+    async def boom(q, limit): raise RuntimeError("down")
+    async def empty(q, limit): return []
+    async def pubmed(q, limit):
+        called["pubmed"] = True
+        return []
+
+    monkeypatch.setattr(litsearch, "_openalex", boom)
+    monkeypatch.setattr(litsearch, "_crossref", boom)
+    monkeypatch.setattr(litsearch, "_semantic", boom)
+    monkeypatch.setattr(litsearch, "_pubmed", pubmed)
+    monkeypatch.setattr(settings, "pubmed_enabled", False)
+    monkeypatch.setattr(litsearch, "_CACHE", {})
+
+    import asyncio
+    with pytest.raises(RuntimeError):
+        asyncio.run(litsearch.search_literature("q", limit=3))
+    assert called["pubmed"] is False

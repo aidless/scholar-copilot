@@ -88,6 +88,34 @@ def _norm_semantic(item: dict) -> dict | None:
     }
 
 
+def _norm_pubmed(item: dict) -> dict | None:
+    """PubMed esummary 结果归一化。doi 需从 articleids 里挑（不是每个条目都有）。"""
+    title = (item.get("title") or "").strip()
+    if not title:
+        return None
+    doi = ""
+    for aid in item.get("articleids") or []:
+        if aid.get("idtype") == "doi" and aid.get("value"):
+            doi = aid["value"]
+            break
+    year = None
+    pubdate = item.get("pubdate") or ""
+    if pubdate[:4].isdigit():
+        year = int(pubdate[:4])
+    authors = [a.get("name", "") for a in (item.get("authors") or []) if a.get("name")]
+    return {
+        "title": title.rstrip("."),
+        "authors": authors[:8],
+        "year": year,
+        "doi": doi,
+        "url": (f"https://doi.org/{doi}" if doi
+                else f"https://pubmed.ncbi.nlm.nih.gov/{item.get('uid')}/"),
+        "venue": item.get("fulljournalname") or item.get("source"),
+        "cited_by": 0,  # esummary 不返回被引数（要 elink 再查一轮，成本不划算）
+        "source": "pubmed",
+    }
+
+
 async def _openalex(q: str, limit: int) -> list[dict]:
     params = {
         "search": q,
@@ -130,6 +158,33 @@ async def _semantic(q: str, limit: int) -> list[dict]:
         return [n for x in r.json().get("data", []) if (n := _norm_semantic(x))]
 
 
+async def _pubmed(q: str, limit: int) -> list[dict]:
+    """PubMed 两步检索：esearch 拿 PMID 列表，esummary 拿元数据。
+
+    为什么两步：esearch 只回 id，esummary 才有标题/作者/DOI。两步各一次请求，
+    比 efetch 的 XML 解析省事且字段够用。
+    """
+    common = {"db": "pubmed", "retmode": "json"}
+    if settings.pubmed_api_key:
+        common["api_key"] = settings.pubmed_api_key
+    if settings.pubmed_email:
+        common["email"] = settings.pubmed_email
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r1 = await client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                              params={**common, "term": q, "retmax": min(limit, 20)})
+        r1.raise_for_status()
+        ids = (r1.json().get("esearchresult") or {}).get("idlist") or []
+        if not ids:
+            return []
+        r2 = await client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                              params={**common, "id": ",".join(ids)})
+        r2.raise_for_status()
+        result = r2.json().get("result") or {}
+        items = [result[i] for i in ids if i in result]
+        return [n for x in items if (n := _norm_pubmed(x))]
+
+
 def _dedupe(results: list[dict]) -> list[dict]:
     """按 DOI（无 DOI 用规范化标题）去重，保留先到的（源优先级更高）。"""
     seen: set[str] = set()
@@ -144,10 +199,13 @@ def _dedupe(results: list[dict]) -> list[dict]:
 
 
 async def search_literature(q: str, limit: int = 8) -> dict:
-    """OpenAlex 优先，失败降级 Crossref；两源都挂 → 502 语义由路由层转。
+    """四源依次降级：OpenAlex → Crossref → Semantic Scholar → PubMed。
+
+    每个源失败只记日志继续下一个；全部失败才抛 RuntimeError（路由层转 502）。
+    任一本源返回非空即停——多源是为了「这个源挂了还有别的」，不是为了混排。
 
     Returns:
-        {"results": [...], "source": "openalex|crossref", "cached": bool}
+        {"results": [...], "source": "<源名>|cache", "cached": bool}
     """
     key = f"{q.strip().lower()}|{limit}"
     cached = _cache_get(key)
@@ -155,7 +213,10 @@ async def search_literature(q: str, limit: int = 8) -> dict:
         return {"results": cached, "source": "cache", "cached": True}
 
     errors: list[str] = []
-    for name, fn in (("openalex", _openalex), ("crossref", _crossref), ("semantic_scholar", _semantic)):
+    sources = [("openalex", _openalex), ("crossref", _crossref), ("semantic_scholar", _semantic)]
+    if settings.pubmed_enabled:
+        sources.append(("pubmed", _pubmed))
+    for name, fn in sources:
         try:
             results = await fn(q, limit)
             if results:

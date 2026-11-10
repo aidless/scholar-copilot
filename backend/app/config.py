@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     openalex_mailto: str = ""
     openalex_api_key: str = ""
     semantic_scholar_api_key: str = ""
+    # PubMed（NCBI E-utilities）：无 key 也能用（3 req/s），填 key 提到 10 req/s
+    pubmed_enabled: bool = True
+    pubmed_api_key: str = ""
+    pubmed_email: str = ""
 
     # 免费大纲次数（服务端强制，quota_ledger 台账）
     free_outline_limit: int = 3
