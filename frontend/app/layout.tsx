@@ -1,4 +1,6 @@
 // 根布局：导航里刻意没有「代写/过查重」类文案——定位是 Copilot 不是代工
+import "./globals.css";
+
 export const metadata = { title: "Scholar Copilot", description: "开源学术写作 Copilot" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

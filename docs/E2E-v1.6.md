@@ -319,3 +319,35 @@ bash scripts/demo_local.sh
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；
   v1.4 已在真模型 + arq 链路上验过 queued→done 两帧与 result 载荷。
 - WS 降级路径靠代码逻辑与 `transport` 状态覆盖，未在真实反代（nginx 未配 Upgrade）环境实测。
+
+## 10. 前端样式修复（v1.6.1，headless 截图暴露）
+
+### 问题（真发现，不是猜）
+`next build` 退出码 0、8 路由全 200，光看构建日志完全正常。但用
+`google-chrome --headless=new --screenshot` 截 `/`（127.0.0.1:3941）得到的
+图是**裸 HTML**：导航栏一堆蓝色下划线链接、登录表单无边框无留白、
+按钮是系统默认样式——Tailwind 一个类都没生效。
+
+### 根因
+`frontend/app/layout.tsx` 的 `<body className="min-h-screen bg-white ...">`
+用了一堆 Tailwind 类，但整个文件**没有 `import "./globals.css"`**。
+`app/globals.css` 里只有 `@import "tailwindcss";`（Tailwind v4 的入口），
+`postcss.config.mjs` 也已配 `@tailwindcss/postcss`——唯独布局没把入口 css 引进来，
+于是 Next 构建时根本不生成 utility 样式（构建「成功」是因为语法没错，不是样式对了）。
+
+### 改法
+`app/layout.tsx` 顶部加 `import "./globals.css";`。
+
+### 验证（实测）
+- 重新 `next build`（`NEXT_PUBLIC_API_BASE=http://localhost:8940`）→ EXIT=0；
+- 构建产物出现 `/_next/static/css/ce70facc1cdff91a.css`（**11,993 字节**，
+  首行 `/*! tailwindcss v4.3.5 | MIT License ...`）；
+- 页面 HTML 带 `<link rel="stylesheet" href="/_next/static/css/...">`；
+- 重截登录页：导航栏改为 flex 横排、表单圆角边框、登录按钮深色填充——
+  样式正常（`docs/screenshots/login.png`）；
+- 同法截 `/workbench`（下单表单/我的订单两栏）、`/review`（体检+改写输入区）、
+  `/admin`（管理台登录框）四页，全部样式正常，已入库 `docs/screenshots/`。
+
+### 教训
+**构建通过 ≠ UI 可演示**。`next build` 不校验 CSS 是否真的被引入；
+以后前端任何改动都要跑一次 headless 截图肉眼确认，不能只看 EXIT=0。

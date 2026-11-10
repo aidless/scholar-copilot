@@ -49,6 +49,18 @@ flowchart LR
     B -->|调用| L
 ```
 
+## 界面预览
+
+真实渲染（`next build` 后 headless Chrome 截图，非设计稿）：
+
+| 登录 / 注册 | 写作台（下单→大纲→逐章→改稿→支付→导出） |
+|---|---|
+| ![登录](docs/screenshots/login.png) | ![写作台](docs/screenshots/workbench.png) |
+| **文本体检 / 降重改写** | **管理台（RBAC 登录）** |
+| ![文本体检](docs/screenshots/review.png) | ![管理台](docs/screenshots/admin.png) |
+
+> 定位上刻意不做「代写 / 过查重」：体检只报可测量特征（字数、句长、引用标记密度、重复片段、套话密度），不承诺检测率。
+
 ## 快速开始
 
 **零依赖先看一眼（30 秒，不用 Docker、不用 API 密钥）：**
@@ -118,6 +130,7 @@ python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 
 - [x] v1.4 检索与可观测性：文献三源降级（OpenAlex → Crossref → Semantic Scholar）+ DOI/标题去重，OpenAlex 支持 `SC_OPENALEX_MAILTO`（礼貌池）/`SC_OPENALEX_API_KEY`，S2 支持 `SC_SEMANTIC_SCHOLAR_API_KEY`；引用核查在 Crossref 未达 verified 时自动补查 S2 并在 `evidence.source` 标注实际源；任务进度 WebSocket `GET /jobs/{id}/ws?token=`（属主校验失败一律 1008 关闭，不泄露任务存在性）；运营日报 `GET /admin/reports/summary?days=`（收入/新单/新用户/任务分布/token 用量），管理台首页展示；59 项测试通过（含迁移-模型一致性门、时区列门、管理员引导门）
 - [x] v1.5 运营闭环：限流可切 Redis 共享计数（`SC_RATE_LIMIT_BACKEND`，多实例不再配额放大）；运营日报定时推送 `push_daily_report`（arq cron，口径与管理台 `/admin/reports/summary` 同源，默认关闭，webhook 载荷同时给结构化 `data` 与纯文本 `text`，失败软返回不刷屏）；69 项测试通过（含限流 Redis 后端 4 项与日报推送 6 项）
 - [x] v1.6 检索与进度体验：文献源扩到四源（新增 PubMed E-utilities 两步检索 esearch→esummary，可 `SC_PUBMED_ENABLED` 关掉，配 `SC_PUBMED_API_KEY` 从 3 req/s 提到 10 req/s）；写作台任务进度接 WebSocket（`useJobProgress`，WS 建不起来自动降级 2 秒轮询，进度条显示传输方式）；引用核查补查链扩到 Crossref→S2→PubMed（首源达阈值即停，不浪费配额）；`openapi.yaml` 改为从 FastAPI 导出并加一致性门（改了端点没重新导出就红，CI 里也挡）；启动自检把「配置看起来能跑、实际跑不通」前置到启动日志（缺密钥/开发模式/mock 支付/默认 JWT/双真相源/多进程限流）；`scripts/demo_local.sh` 一键演示（30 秒不用 Docker 不用密钥跑完整流程）；worker 健康检查修正（探 HTTP 导致永久 unhealthy 的假警报）；98 项测试通过
+- [x] v1.6.1 前端样式修复：`app/layout.tsx` 漏 `import "./globals.css"` 导致 Tailwind 根本没加载（headless 截图暴露：整站渲染成裸 HTML）——补上并重 build 验证 CSS 产物 11,993 字节、登录/写作台/体检/管理台四页截图入库 `docs/screenshots/`，README 加「界面预览」
 - [ ] v1.7 计划：日报推送支持邮件通道、导出 LaTeX 编译服务化、微信真实回调网关
 
 ## 学术诚信
