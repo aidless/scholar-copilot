@@ -25,7 +25,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install . pytest pytest-asyncio httpx
+          pip install ".[dev]" pytest httpx
       - name: Alembic 迁移可在空库落地
         env:
           SC_DATABASE_URL: sqlite+aiosqlite:///./ci-alembic.db
