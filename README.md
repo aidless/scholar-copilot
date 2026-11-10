@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-1.4.0-blue)
-![tests](https://img.shields.io/badge/tests-53%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-59%20passed-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
 
@@ -67,7 +67,7 @@ cd frontend && npm install && npm run dev
 
 生产部署（迁移 / TLS / 限流 / 备份）与常见问题：见 [`docs/DEPLOY.md`](docs/DEPLOY.md)。
 
-## 工程加固（v1.0）
+## 工程加固（v1.0 → v1.4 持续）
 
 | 项 | 做法 |
 |---|---|
@@ -76,7 +76,10 @@ cd frontend && npm install && npm run dev
 | 前端越权调用 | CORS 白名单（`SC_CORS_ORIGINS`），非白名单来源无 `Access-Control-Allow-Origin` |
 | prompt 注入 | 用户文本一律 `wrap_untrusted()` 包裹：边界声明 + 哨兵中和（`<<<`/`>>>`/围栏/哨兵词），有逃逸单测 |
 | 数据库演进 | alembic 迁移（`migrations/versions/64bfd6724d4e`），生产 `SC_DB_AUTO_CREATE=false` |
-| 交付形态 | 后端/前端 Dockerfile + compose 一键起；CI 跑 pytest + 空库迁移 + 前端 build |
+| 交付形态 | 后端/前端 Dockerfile + compose 一键起（postgres/redis/backend/worker/frontend 五容器）；CI 跑 pytest + 空库迁移 + 前端 build |
+| schema 漂移 | 单一真相源 = alembic：compose 里 backend 启动先 `alembic upgrade head`，`SC_DB_AUTO_CREATE=false`；`tests/test_migrations_match_models.py` 空库真跑迁移再与 `Base.metadata` 逐表逐列比对（已做删列 RED 反证） |
+| 时区崩溃 | 全部时间列 `DateTime(timezone=True)` + 迁移同步；`tests/test_datetime_columns_tz.py` 静态门（Postgres 下 aware/naive 混用会启动即崩，SQLite 测不出） |
+| 管理员引导 | 初始 superadmin 引导与建表方式解耦（alembic 建表时也生效），幂等；密码只从环境注入，空则不建 |
 
 ## 与已有资产的关系
 
@@ -93,7 +96,7 @@ cd frontend && npm install && npm run dev
 - [x] v1.1 白标多租户 + 分销 + 演示与图表：按域名解析租户、`GET /tenant/branding` 只暴露品牌白名单（名称/配色/Logo/客服，绝不返回渠道密钥——正面修复原产品 websiteInfo 泄露洞）；分销代理（推广码登录、佣金=服务端价×万分比、只在订单支付成功时生成、结算/提现全走审计日志）；`POST /tools/ppt` 生成可编辑 PPTX、`POST /tools/diagram` 输出 Mermaid 源码（不返回黑盒图片）；`POST /orders/{id}/export?format=pdf` 真实 LibreOffice 转换；新增 alembic 迁移 e1fecb79f92b（5 表 + writing_orders.distributor_code）；40 项测试通过（含 PDF 真实转换与租户不泄密断言）
 - [x] v1.2 认证与任务层：短信验证码改为「随机码 + SHA-256 摘要入库 + 5 分钟过期 + 限 5 次尝试」，且**不对手机号注册状态做分支响应**（正面修复原产品静态盐 sign 的注册状态枚举 oracle）；网关抽象 `dev|http` 两驱动；微信扫码登录（dev 可 mock 确认，生产需 `SC_WECHAT_APP_ID/SECRET`）；任务队列抽象 `SC_TASK_QUEUE=inline|arq`——端点统一 `enqueue()`，切 arq 即交独立 worker（`arq app.tasks.worker.WorkerSettings`），端点契约不变；45 项测试通过
 - [x] v1.3 导出与运营报表：LaTeX 导出（`export?format=tex`，ctexart 单文件，特殊字符转义、披露表与免责声明同在）；管理端对账 CSV 导出（订单/支付/佣金/审计四类，UTF-8 BOM、导出动作留审计）；前端补微信扫码入口（dev 模拟确认）与管理台 CSV 按钮；47 项测试通过
-- [x] v1.4 检索与可观测性：文献三源降级（OpenAlex → Crossref → Semantic Scholar）+ DOI/标题去重，OpenAlex 支持 `SC_OPENALEX_MAILTO`（礼貌池）/`SC_OPENALEX_API_KEY`，S2 支持 `SC_SEMANTIC_SCHOLAR_API_KEY`；引用核查在 Crossref 未达 verified 时自动补查 S2 并在 `evidence.source` 标注实际源；任务进度 WebSocket `GET /jobs/{id}/ws?token=`（属主校验失败一律 1008 关闭，不泄露任务存在性）；运营日报 `GET /admin/reports/summary?days=`（收入/新单/新用户/任务分布/token 用量），管理台首页展示；53 项测试通过
+- [x] v1.4 检索与可观测性：文献三源降级（OpenAlex → Crossref → Semantic Scholar）+ DOI/标题去重，OpenAlex 支持 `SC_OPENALEX_MAILTO`（礼貌池）/`SC_OPENALEX_API_KEY`，S2 支持 `SC_SEMANTIC_SCHOLAR_API_KEY`；引用核查在 Crossref 未达 verified 时自动补查 S2 并在 `evidence.source` 标注实际源；任务进度 WebSocket `GET /jobs/{id}/ws?token=`（属主校验失败一律 1008 关闭，不泄露任务存在性）；运营日报 `GET /admin/reports/summary?days=`（收入/新单/新用户/任务分布/token 用量），管理台首页展示；59 项测试通过（含迁移-模型一致性门、时区列门、管理员引导门）
 - [ ] v1.5 计划：PubMed 源、报表定时推送（邮件/Webhook）、导出 LaTeX 编译服务化、前端任务进度条接 WS
 
 ## 学术诚信
