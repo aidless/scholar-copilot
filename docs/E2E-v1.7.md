@@ -142,3 +142,30 @@ v1.3 起 `format=tex` 只能产出 `.tex` 源文件，用户还得自己在本�
 
 ### 未验证项
 - 本机无 TeX 发行版，真实编译只在 CI（装 texlive 后）执行；复杂模板（多级目录、大量交叉引用、参考文献 bibtex）未压测，当前只编译正文+披露表+免责声明的单文件。
+
+---
+
+## 9. 网站应用扫码登录：code→openid 回调（同日追加）
+
+### 为什么
+第 7 节补的是「公众号事件推送」这条链路；但仓库 `/auth/wechat/qrcode` 生成的是
+**网站应用**（open.weixin.qq.com/connect/qrconnect）二维码，浏览器扫码授权后微信会
+重定向回 `redirect_uri?code=CODE&state=scene`。这条「用 code 换 openid」的回调此前是空的。
+
+### 实现
+- `backend/app/wechat.py` 新增 `async fetch_openid(code, appid, secret, timeout=10)`：
+  GET `https://api.weixin.qq.com/sns/oauth2/access_token?appid&secret&code&grant_type=authorization_code`；
+  **必须判 `errcode`**（微信失败也回 HTTP 200），有 errcode / 缺 openid / 网络异常 → 抛 `RuntimeError`。
+- `backend/app/routers/auth.py` 新增 `GET /auth/wechat/oauth/callback?code&state`：
+  未配 appid/secret → 503；缺参 → 422；scene 不存在 → 404；换 openid（失败 → 502）→
+  把 pending 会话推进为 scanned（openid 已绑定用户则 confirmed）；返回极简 HTML「登录成功，可关闭本页」。
+- `qrcode` 端点在 `wechat_app_id` 已配时，qrconnect URL 补上 `redirect_uri`（来自新配置 `SC_WECHAT_REDIRECT_URI`）+ `response_type=code`。
+- 配置：`SC_WECHAT_REDIRECT_URI`；`.env.example` 同步。
+
+### 测试（`tests/test_wechat_callback.py` 追加 6 项，总 20 项）
+- 未配置 503 / 缺 code 422 / scene 不存在 404 / 成功 → scanned + HTML 含「登录成功」/ 已绑定 openid → confirmed+token / fetch 抛错 → 502 且 detail 含 errcode
+- `fetch_openid` 用 monkeypatch 免真实微信；错误分支覆盖 errcode（40029 invalid code）
+- 全套 `pytest` = **131 passed, 1 skipped**（本机无 TeX，逐条 skip；CI 装 texlive 后 132 项全跑）
+
+### 未验证项
+- 真实网站应用 appid/secret 的端到端扫码需真实开放平台账号；本轮只验证到「code 换 openid 的 HTTP 契约 + 会话推进」逻辑，微信侧网络交互用 monkeypatch 替身。

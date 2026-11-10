@@ -310,6 +310,47 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+  /auth/wechat/oauth/callback:
+    get:
+      tags:
+      - auth
+      summary: Wechat Oauth Callback
+      description: '网站应用扫码登录回调：微信重定向到此处带 code+state(scene)。
+
+
+        用 code 换 openid → 推进对应扫码会话（已绑定用户则直接 confirmed）。
+
+        成功后返回一段极简 HTML（浏览器可关闭），真实登录态由前端 poll 拿 token。'
+      operationId: wechat_oauth_callback_auth_wechat_oauth_callback_get
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Code
+      - name: state
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: State
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders:
     post:
       tags:

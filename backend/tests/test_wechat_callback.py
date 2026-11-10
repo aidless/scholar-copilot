@@ -174,3 +174,81 @@ def test_complete_unknown_scene_404(client, monkeypatch):
     _patch_token(monkeypatch)
     r = client.post("/auth/wechat/complete", json={"scene": "nope", "phone": "13900000002"})
     assert r.status_code == 404
+
+
+# ── 网站应用扫码登录：code 换 openid 回调 ─────────────────────────────────
+
+def _patch_app(monkeypatch, appid="wxapp", secret="wxsecret"):
+    monkeypatch.setattr(settings, "wechat_app_id", appid)
+    monkeypatch.setattr(settings, "wechat_app_secret", secret)
+
+
+def test_oauth_callback_not_configured_503(client, monkeypatch):
+    monkeypatch.setattr(settings, "wechat_app_id", "")
+    r = client.get("/auth/wechat/oauth/callback", params={"code": "c", "state": "s"})
+    assert r.status_code == 503
+
+
+def test_oauth_callback_missing_code_422(client, monkeypatch):
+    _patch_app(monkeypatch)
+    r = client.get("/auth/wechat/oauth/callback", params={"state": "s"})
+    assert r.status_code == 422
+
+
+def test_oauth_callback_unknown_scene_404(client, monkeypatch):
+    _patch_app(monkeypatch)
+    r = client.get("/auth/wechat/oauth/callback", params={"code": "c", "state": "nope"})
+    assert r.status_code == 404
+
+
+def test_oauth_callback_marks_scene_scanned(client, monkeypatch):
+    _patch_app(monkeypatch)
+    scene = _make_scene(client)
+
+    async def fake_fetch(code, appid, secret, timeout=10.0):
+        assert code == "the-code"
+        return {"openid": "oOAUTH_1", "access_token": "at"}
+
+    import app.routers.auth as authmod
+    monkeypatch.setattr(authmod.wx, "fetch_openid", fake_fetch)
+    r = client.get("/auth/wechat/oauth/callback", params={"code": "the-code", "state": scene})
+    assert r.status_code == 200
+    assert "登录成功" in r.text
+    assert client.get(f"/auth/wechat/poll?scene={scene}").json()["status"] == "scanned"
+
+
+def test_oauth_callback_bound_openid_auto_confirms(client, monkeypatch):
+    _patch_app(monkeypatch)
+    # 先扫码+complete 绑定 openid
+    scene1 = _make_scene(client)
+    sig = _sign("wxtok", "123", "456")
+    monkeypatch.setattr(settings, "wechat_token", "wxtok")
+    _push_event(client, _event_xml(scene1, "oOAUTH_BOUND"), sig)
+    client.post("/auth/wechat/complete", json={"scene": scene1, "phone": "13900000001"})
+
+    scene2 = _make_scene(client)
+
+    async def fake_fetch(code, appid, secret, timeout=10.0):
+        return {"openid": "oOAUTH_BOUND", "access_token": "at"}
+
+    import app.routers.auth as authmod
+    monkeypatch.setattr(authmod.wx, "fetch_openid", fake_fetch)
+    r = client.get("/auth/wechat/oauth/callback", params={"code": "c", "state": scene2})
+    assert r.status_code == 200
+    poll = client.get(f"/auth/wechat/poll?scene={scene2}").json()
+    assert poll["status"] == "confirmed"
+    assert "access_token" in poll
+
+
+def test_oauth_callback_fetch_error_502(client, monkeypatch):
+    _patch_app(monkeypatch)
+    scene = _make_scene(client)
+
+    async def fake_fetch(code, appid, secret, timeout=10.0):
+        raise RuntimeError("微信返回错误：40029 invalid code")
+
+    import app.routers.auth as authmod
+    monkeypatch.setattr(authmod.wx, "fetch_openid", fake_fetch)
+    r = client.get("/auth/wechat/oauth/callback", params={"code": "bad", "state": scene})
+    assert r.status_code == 502
+    assert "40029" in r.json()["detail"]

@@ -61,3 +61,29 @@ def extract_scene(event_key: str) -> str:
     if key.startswith("qrscene_"):
         return key[len("qrscene_"):]
     return key
+
+
+async def fetch_openid(code: str, appid: str, secret: str, timeout: float = 10.0) -> dict:
+    """网站应用扫码登录：用临时 code 换 access_token + openid。
+
+    WeChat 文档：GET https://api.weixin.qq.com/sns/oauth2/access_token?appid&secret&code&grant_type
+    成功返回含 openid/access_token 的 JSON；失败返回 {"errcode":..., "errmsg":...}（HTTP 仍 200），
+    因此必须判 errcode 而非只看状态码。任何失败抛 RuntimeError（路由层转 502）。
+    """
+    import httpx
+
+    url = "https://api.weixin.qq.com/sns/oauth2/access_token"
+    params = {"appid": appid, "secret": secret, "code": code, "grant_type": "authorization_code"}
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:  # 网络异常/非 JSON 一律归为失败
+        raise RuntimeError(f"微信 code 换取 openid 失败：{exc}") from exc
+
+    if data.get("errcode"):
+        raise RuntimeError(f"微信返回错误：{data.get('errcode')} {data.get('errmsg', '')}".strip())
+    if not data.get("openid"):
+        raise RuntimeError("微信响应缺少 openid")
+    return data

@@ -4,6 +4,7 @@
 """
 import re
 import uuid
+from urllib.parse import quote
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -147,9 +148,11 @@ async def wechat_qrcode(db: AsyncSession = Depends(get_db)):
             raise HTTPException(503, "微信登录未配置（需 SC_WECHAT_APP_ID / SC_WECHAT_APP_SECRET）")
         return {"scene": scene, "mode": "dev", "qr_url": f"dev://wechat/{scene}",
                 "poll_after_seconds": 2}
+    redirect = settings.wechat_redirect_uri or ""
     return {"scene": scene, "mode": "wechat",
             "qr_url": f"https://open.weixin.qq.com/connect/qrconnect?appid={settings.wechat_app_id}"
-                      f"&scope=snsapi_login&state={scene}#wechat_redirect",
+                      f"&redirect_uri={quote(redirect, safe='')}"
+                      f"&response_type=code&scope=snsapi_login&state={scene}#wechat_redirect",
             "poll_after_seconds": 2}
 
 
@@ -285,3 +288,44 @@ async def wechat_complete(body: dict, db: AsyncSession = Depends(get_db)):
         await db.commit()
     return {"status": "confirmed", "access_token": make_token(user.id, user.tenant_id),
             "token_type": "bearer"}
+
+
+@router.get("/wechat/oauth/callback")
+async def wechat_oauth_callback(
+    code: str = "", state: str = "", db: AsyncSession = Depends(get_db)
+):
+    """网站应用扫码登录回调：微信重定向到此处带 code+state(scene)。
+
+    用 code 换 openid → 推进对应扫码会话（已绑定用户则直接 confirmed）。
+    成功后返回一段极简 HTML（浏览器可关闭），真实登录态由前端 poll 拿 token。
+    """
+    if not settings.wechat_app_id or not settings.wechat_app_secret:
+        raise HTTPException(503, "微信登录未配置（需 SC_WECHAT_APP_ID / SC_WECHAT_APP_SECRET）")
+    if not code or not state:
+        raise HTTPException(422, "缺少 code 或 state")
+    ws = (await db.execute(
+        select(WechatScene).where(WechatScene.scene == state)
+    )).scalars().first()
+    if ws is None:
+        raise HTTPException(404, "扫码会话不存在")
+    try:
+        data = await wx.fetch_openid(code, settings.wechat_app_id, settings.wechat_app_secret)
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from None
+    openid = data["openid"]
+    if ws.status == "pending":
+        ws.openid = openid
+        bound = (await db.execute(
+            select(User).where(User.wechat_openid == openid)
+        )).scalars().first()
+        if bound is not None:
+            ws.status = "confirmed"
+            ws.user_id = bound.id
+            ws.confirmed_at = datetime.now(timezone.utc)
+        else:
+            ws.status = "scanned"
+        await db.commit()
+    return Response(
+        content="<html><body><h3>登录成功，请回到原窗口继续（可关闭本页）。</h3></body></html>",
+        media_type="text/html",
+    )

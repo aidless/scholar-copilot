@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-1.7.0-blue)
-![tests](https://img.shields.io/badge/tests-126%20tests-brightgreen)
+![tests](https://img.shields.io/badge/tests-132%20tests-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
 
@@ -133,6 +133,7 @@ python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 
 - [x] v1.6.1 前端样式修复：`app/layout.tsx` 漏 `import "./globals.css"` 导致 Tailwind 根本没加载（headless 截图暴露：整站渲染成裸 HTML）——补上并重 build 验证 CSS 产物 11,993 字节、登录/写作台/体检/管理台四页截图入库 `docs/screenshots/`，README 加「界面预览」
 - [x] v1.7 运营闭环（邮件通道）：日报推送支持 SMTP 邮件第二通道——`SC_REPORT_WEBHOOK_URL` 为空且 `SC_REPORT_EMAIL_TO` 非空时自动走邮件（webhook 优先），支持 STARTTLS/SSL/登录，收件人逗号分隔；发信失败软返回不刷屏；配置齐全时 arq cron 同一份 `summary` 口径双通道复用；107 项测试通过（含邮件通道选择/优先级/软失败/邮件头 5 项 + 真网络假 SMTP 收信实测）
 - [x] v1.7 微信真实回调网关：`GET/POST /auth/wechat/callback` 验签（sha1 排序拼接 + `hmac.compare_digest`）+ 事件 XML 解析（subscribe/SCAN → scene 转 scanned/confirmed）+ `POST /auth/wechat/complete` 建号绑定 openid；`users.wechat_openid`/`wechat_scenes.openid` 两列（alembic a7c1e2d4f6b8）；未配 Token/签名错一律 403；14 项测试 + RED→GREEN 反证
+- [x] v1.7 网站应用扫码登录 code→openid 回调：`GET /auth/wechat/oauth/callback`（`fetch_openid` 判 errcode、会话推进 scanned/confirmed）、`qrcode` 补 `redirect_uri`+`response_type=code`；6 项测试
 - [x] v1.7 导出 LaTeX 编译服务化：`format=latexpdf` → `build_thesis_tex` + `tex_bytes_to_pdf`（xelatex 两遍编译、非交互模式、nonstopmode）；无 TeX → 502 明确报错；CI 装 texlive-xetex/lang-chinese 让真实编译用例执行；测试 5 项（含「未安装 vs 编译失败」强断言 RED→GREEN）
 
 ## 学术诚信
