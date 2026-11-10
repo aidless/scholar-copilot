@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: backend tests (py3.12)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest pytest-asyncio httpx
+      - name: Alembic 迁移可在空库落地
+        env:
+          SC_DATABASE_URL: sqlite+aiosqlite:///./ci-alembic.db
+        run: alembic upgrade head
+      - name: Tests
+        run: python -m pytest tests/ -q
+
+  frontend:
+    name: frontend build (node20)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Typecheck + Build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_API_BASE: http://localhost:8000
+        run: npm run build

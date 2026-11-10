@@ -1,6 +1,6 @@
 [project]
 name = "scholar-copilot-backend"
-version = "0.5.0"
+version = "1.0.0"
 description = "开源学术写作 Copilot 后端（FastAPI + PostgreSQL + arq）"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "bcrypt>=4.1",
     "pyjwt>=2.9",
     "python-docx>=1.1",
+    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
