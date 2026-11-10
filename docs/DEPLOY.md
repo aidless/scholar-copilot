@@ -40,6 +40,24 @@ SC_REPORT_PUSH_DAYS=1     # 汇总窗口
 载荷同时含 `msgtype/text`（IM 机器人直接用）与结构化 `data`；口径与
 `GET /admin/reports/summary` 完全同源。关闭时不会发任何外部请求。
 
+**邮件通道（v1.7，webhook 为空时启用）**：
+
+```bash
+SC_REPORT_PUSH_ENABLED=true
+SC_REPORT_WEBHOOK_URL=            # 留空 → 走邮件
+SC_REPORT_EMAIL_TO=ops@example.com,lead@example.com
+SC_SMTP_HOST=smtp.example.com
+SC_SMTP_PORT=587
+SC_SMTP_USER=bot@example.com
+SC_SMTP_PASSWORD=xxx
+SC_SMTP_STARTTLS=true             # 465(SSL) 场景改 SC_SMTP_SSL=true 且 STARTTLS=false
+# SC_SMTP_FROM=                   # 空则用 SC_SMTP_USER
+```
+
+两通道二选一：webhook 非空优先，否则有收件人就走 SMTP。发信失败软返回
+（`pushed=false` + 原因），不会让 arq cron 反复报错。启动自检会提示
+「开了推送但两个通道都没配」「走邮件但没配 SMTP_HOST」两种情况。
+
 ## 2. 本地开发
 
 ```bash

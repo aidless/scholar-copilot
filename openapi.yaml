@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 1.6.0
+  version: 1.7.0
   description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
 

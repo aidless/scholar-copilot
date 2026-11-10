@@ -62,4 +62,14 @@ def startup_warnings(s: Settings) -> list[str]:
             "SC_RATE_LIMIT_BACKEND=memory 但已启用 arq 多进程：限流配额会按进程数放大，建议改 redis。"
         )
 
+    if s.report_push_enabled:
+        if not s.report_webhook_url and not s.report_email_to:
+            out.append(
+                "SC_REPORT_PUSH_ENABLED=true 但 webhook 与邮件收件人都没配：日报定时任务会空跑不发。"
+            )
+        elif not s.report_webhook_url and s.report_email_to and not s.smtp_host:
+            out.append(
+                "日报走邮件通道但 SC_SMTP_HOST 为空：cron 到点会发信失败，请补 SMTP 配置。"
+            )
+
     return out

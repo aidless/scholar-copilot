@@ -99,3 +99,33 @@ def test_inline_queue_with_memory_ratelimit_ok():
     """单进程 inline 场景用 memory 限流完全正确，不该报警。"""
     msgs = startup_warnings(_s(rate_limit_backend="memory", task_queue="inline"))
     assert not any("SC_RATE_LIMIT_BACKEND" in m for m in msgs)
+
+
+def test_report_push_enabled_without_channel_warns():
+    """开了日报推送但 webhook/邮箱都没配 = 定时任务空跑，启动时应提醒。"""
+    msgs = startup_warnings(_s(report_push_enabled=True,
+                               report_webhook_url="", report_email_to=""))
+    assert any("SC_REPORT_PUSH_ENABLED" in m and "空跑" in m for m in msgs)
+
+
+def test_report_email_channel_without_smtp_host_warns():
+    """走邮件通道但没配 SMTP host = 到点发信必失败，应提前喊。"""
+    msgs = startup_warnings(_s(report_push_enabled=True,
+                               report_webhook_url="", report_email_to="a@example.com",
+                               smtp_host=""))
+    assert any("SC_SMTP_HOST" in m for m in msgs)
+
+
+def test_report_email_channel_configured_no_warn():
+    """邮件通道配置完整时不报警。"""
+    msgs = startup_warnings(_s(report_push_enabled=True,
+                               report_webhook_url="", report_email_to="a@example.com",
+                               smtp_host="smtp.example.com"))
+    assert not any("SC_SMTP_HOST" in m or "空跑" in m for m in msgs)
+
+
+def test_report_webhook_configured_no_warn():
+    """webhook 通道配置时不报警（即使没配 SMTP）。"""
+    msgs = startup_warnings(_s(report_push_enabled=True,
+                               report_webhook_url="http://hook/x", report_email_to=""))
+    assert not any("SC_REPORT_PUSH_ENABLED" in m or "SC_SMTP_HOST" in m for m in msgs)

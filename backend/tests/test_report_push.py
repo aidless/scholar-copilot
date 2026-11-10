@@ -53,13 +53,15 @@ async def test_disabled_does_not_send(monkeypatch):
 
 @pytest.mark.anyio
 async def test_missing_webhook_does_not_send(monkeypatch):
+    """webhook 与 email 都没配时，不得发任何请求。"""
     monkeypatch.setattr(settings, "report_push_enabled", True)
     monkeypatch.setattr(settings, "report_webhook_url", "")
+    monkeypatch.setattr(settings, "report_email_to", "")
     _FakeClient.sent = []
     monkeypatch.setattr(report_mod.httpx, "AsyncClient", _FakeClient)
 
     out = await report_mod.push_daily_report()
-    assert out == {"pushed": False, "reason": "no_webhook_url"}
+    assert out == {"pushed": False, "reason": "no_channel_configured"}
     assert _FakeClient.sent == []
 
 
@@ -144,3 +146,95 @@ def test_cron_registered_only_when_enabled(monkeypatch):
     assert len(jobs) == 1
     assert jobs[0].name == "daily_report"
     assert jobs[0].hour == 9
+
+
+# ---------------------------------------------------------------------------
+# v1.7 邮件通道
+# ---------------------------------------------------------------------------
+
+@pytest.mark.anyio
+async def test_email_channel_selected_when_no_webhook(monkeypatch):
+    """webhook 为空但配了收件人 → 走 email，且不碰 httpx。"""
+    monkeypatch.setattr(settings, "report_push_enabled", True)
+    monkeypatch.setattr(settings, "report_webhook_url", "")
+    monkeypatch.setattr(settings, "report_email_to", "a@example.com,b@example.com")
+    monkeypatch.setattr(settings, "smtp_host", "smtp.invalid")
+
+    _FakeClient.sent = []
+    monkeypatch.setattr(report_mod.httpx, "AsyncClient", _FakeClient)
+
+    calls = {}
+
+    def fake_send(text):
+        calls["text"] = text
+        return 2
+
+    monkeypatch.setattr(report_mod, "_send_email_sync", fake_send)
+
+    out = await report_mod.push_daily_report()
+    assert out["pushed"] is True
+    assert out["channel"] == "email"
+    assert out["recipients"] == 2
+    assert "运营日报" in calls["text"]
+    assert _FakeClient.sent == [], "走邮件时不得同时打 webhook"
+
+
+@pytest.mark.anyio
+async def test_webhook_takes_priority_over_email(monkeypatch):
+    """两个都配时 webhook 优先，不发邮件。"""
+    monkeypatch.setattr(settings, "report_push_enabled", True)
+    monkeypatch.setattr(settings, "report_webhook_url", "http://hook.invalid/x")
+    monkeypatch.setattr(settings, "report_email_to", "a@example.com")
+    _FakeClient.sent = []
+    _FakeClient.resp = _FakeResp(200)
+    monkeypatch.setattr(report_mod.httpx, "AsyncClient", _FakeClient)
+
+    def boom(text):
+        raise AssertionError("不该走邮件")
+
+    monkeypatch.setattr(report_mod, "_send_email_sync", boom)
+
+    out = await report_mod.push_daily_report()
+    assert out["channel"] == "webhook"
+    assert len(_FakeClient.sent) == 1
+
+
+@pytest.mark.anyio
+async def test_email_failure_is_soft(monkeypatch):
+    """SMTP 连不上要软返回，不能抛。"""
+    monkeypatch.setattr(settings, "report_push_enabled", True)
+    monkeypatch.setattr(settings, "report_webhook_url", "")
+    monkeypatch.setattr(settings, "report_email_to", "a@example.com")
+
+    def boom(text):
+        raise RuntimeError("smtp down")
+
+    monkeypatch.setattr(report_mod, "_send_email_sync", boom)
+
+    out = await report_mod.push_daily_report()
+    assert out["pushed"] is False
+    assert out["channel"] == "email"
+    assert "smtp down" in out["error"]
+
+
+def test_build_email_headers(monkeypatch):
+    """邮件头：Subject/From/To 正确，正文是纯文本。"""
+    monkeypatch.setattr(settings, "report_email_to", "x@example.com,y@example.com")
+    monkeypatch.setattr(settings, "smtp_user", "bot@example.com")
+    monkeypatch.setattr(settings, "smtp_from", "")
+    msg = report_mod._build_email("第一行\n第二行")
+    assert msg["Subject"] == "Scholar Copilot 运营日报"
+    assert "bot@example.com" in msg["From"]
+    to_hdr = msg["To"].replace(" ", "")
+    assert to_hdr == "x@example.com,y@example.com"
+    body = msg.get_content()
+    assert "第一行" in body
+
+
+def test_send_email_sync_requires_host(monkeypatch):
+    """没配 SMTP host 时抛清晰错误（由 push_daily_report 软捕获）。"""
+    monkeypatch.setattr(settings, "smtp_host", "")
+    monkeypatch.setattr(settings, "report_email_to", "a@example.com")
+    with pytest.raises(RuntimeError) as ei:
+        report_mod._send_email_sync("text")
+    assert "SC_SMTP_HOST" in str(ei.value)

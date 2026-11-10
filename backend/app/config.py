@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     report_push_hour: int = 9          # 本地时区每天几点推（UTC 小时，0-23）
     report_push_days: int = 1          # 汇总窗口天数
 
+    # 运营日报——邮件通道（v1.7）：webhook 为空且收件人非空时走 SMTP
+    report_email_to: str = ""          # 收件人，多个用逗号分隔；空则不发邮件
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""                # 发件人地址（空则用 smtp_user）
+    smtp_starttls: bool = True         # 587 一般 True；465(SSL) 场景应配 SC_SMTP_SSL=true
+    smtp_ssl: bool = False
+
     # CORS 白名单（逗号分隔；默认本地开发地址，生产必须显式收紧）
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
