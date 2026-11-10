@@ -194,7 +194,50 @@ pytest tests/test_openapi_sync.py -q  → 5 passed
 旧文件的 `x-origin`（与原产品端点对照）在代码导出的契约里没有——那份对照的价值
 已经沉在 README 的「与逆向原产品的差异」表和 `blx-recon` 报告里，契约文件只留事实。
 
-## 6. 未验证项（如实）
+
+## 6. 启动自检（延迟暴露的配置错误前置）
+
+### 问题
+clone 下来 `docker compose up -d`，`SC_LLM_API_KEY` 没填时：服务能起、页面能开、
+下单也成，**直到第一次生成才 401**，报的还是上游错误——用户会以为是代码坏了。
+同类问题还有：`SC_SMS_DEV_MODE=true` 带到生产（任意手机号 000000 就能注册）、
+`SC_PAYMENT_MODE=mock`（支付不校验渠道）、JWT 密钥还是 `change-me`、
+`SC_DB_AUTO_CREATE=true` + Postgres（create_all 与 alembic 双真相源）、
+`SC_RATE_LIMIT_BACKEND=memory` + arq 多进程（配额按容器数放大，v1.5 真踩过）。
+
+### 改法
+`backend/app/diagnostics.py::startup_warnings(settings) -> list[str]`，纯函数（便于测试），
+`main.py` 的 lifespan 里逐条 `log.warning("启动自检：%s", msg)`。**只警告不阻断**——
+演示模式、自建网关无密钥都是合法场景。
+
+覆盖 9 类：fake provider / 缺 LLM 密钥（含占位符 `sk-xxx`、`changeme`、`todo` 等）/
+SMS dev 模式 / SMS provider=dev / mock 支付 / 无初始管理员 / 默认 JWT 密钥 /
+Postgres + auto_create / memory 限流 + arq 队列。
+
+### 实现 bug（已修，测试抓到）
+`_PLACEHOLDER_KEYS` 里写了大写 `"TODO"`，但比对前做了 `.lower()` → **永远匹配不上**。
+`test_placeholder_llm_key_warns` 用 `("sk-xxx", "changeme", "TODO", "   ")` 四个值跑
+直接红在 `TODO`。改为全小写 `{"", "sk-xxx", "your-api-key", "changeme", "todo", "none", "null"}`。
+
+### 实测（真启动 uvicorn，故意全用「错配置」）
+```
+SC_JWT_SECRET=change-me SC_LLM_PROVIDER=fake SC_SMS_DEV_MODE=true SC_DB_AUTO_CREATE=true
+→ 启动日志 5 条：
+  启动自检：LLM 使用 fake provider（内置假数据），生成内容不是真实模型输出——仅供演示/测试。
+  启动自检：SC_SMS_DEV_MODE=true：任意手机号用验证码 000000 即可注册/登录，且 /auth/wechat/mock-approve 可用——**只能用于本地演示，生产必须关闭**。
+  启动自检：SC_PAYMENT_MODE=mock：支付确认不校验真实渠道回调，生产必须改为真实渠道。
+  启动自检：SC_ADMIN_INITIAL_PASSWORD 为空：不会创建初始管理员，/admin/* 无法登录。首次部署请设置后再启动（建好后可从环境变量移除）。
+  启动自检：SC_JWT_SECRET 仍是默认/测试值：任何人都能伪造登录 token，必须换成随机长串。
+/health → {"status":"ok","version":"1.6.0"}（警告不影响启动，符合设计）
+```
+
+### 测试（15 项）
+基线配置零警告 / 缺密钥 / 占位符 4 值 / fake 不重复抱怨密钥 / SMS dev / mock 支付 /
+无管理员 / JWT 默认 4 值 / Postgres+autocreate / **SQLite+autocreate 不报警** /
+memory+arq 报警 / memory+inline 不报警。后两条是「不误杀」的反向断言——
+只报该报的，否则警告会被当噪音忽略。
+
+## 7. 未验证项（如实）
 - PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
   生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；

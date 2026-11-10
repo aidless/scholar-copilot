@@ -1,4 +1,5 @@
 """应用工厂。健康检查先行，业务路由逐版本点亮。"""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,6 +12,7 @@ from .routers import (admin, auth, billing, distributor, formatting, jobs,
                       payments, references, review, tenant, tools, writing)
 
 VERSION = "1.6.0"
+log = logging.getLogger(__name__)
 OPENAPI_PATH = "/docs"
 
 
@@ -26,6 +28,12 @@ def create_app() -> FastAPI:
             engine, _ = _engine_and_session()
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+
+        # 启动自检：把「配置看起来能跑、实际跑不通」的项在启动日志里说清楚。
+        # 只警告不阻断（演示模式、自建网关无密钥等合法场景要能跑）。
+        from .diagnostics import startup_warnings
+        for _msg in startup_warnings(settings):
+            log.warning("启动自检：%s", _msg)
 
         # 初始管理员：与建表方式解耦（alembic 建表时也要能引导）。
         # 线下交付语义：密码只从环境注入，空则不创建；已存在则跳过（幂等）。
