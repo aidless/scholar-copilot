@@ -1,7 +1,7 @@
 # Scholar Copilot
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-1.4.0-blue)
+![version](https://img.shields.io/badge/version-1.6.0-blue)
 ![tests](https://img.shields.io/badge/tests-98%20passed-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
@@ -28,7 +28,7 @@
 ```
 frontend (Next.js)  ──HTTP──▶  backend (FastAPI)
                                  ├─ tenancy.py      ← 域名/头 → 租户路由 + 属主校验
-                                 ├─ routers/        ← auth / writing / references / review / billing / admin
+                                 ├─ routers/        ← auth / writing / references / review / billing / payments / admin / tenant / distributor / tools
                                  ├─ llm/            ← Provider SPI（openai-compat / 本地 vLLM / Ollama）
                                  ├─ tasks/ (arq)    ← 大纲、逐章、核查的异步任务队列
                                  └─ PostgreSQL      ← deploy/init.sql（含租户/属主列约束）
@@ -47,7 +47,6 @@ flowchart LR
     W -->|写章节/大纲| P
     W -->|调用| L[LLM Provider<br/>OpenAI 兼容]
     B -->|调用| L
-```
 ```
 
 ## 快速开始
