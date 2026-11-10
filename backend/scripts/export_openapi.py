@@ -42,6 +42,26 @@ def build_spec() -> dict:
     # 鉴权方案：路由用 Header 依赖而非 Security 依赖解析 Bearer，FastAPI 不会自动生成
     # securitySchemes。这里显式补上，否则 SDK 生成器不会带 Authorization 头。
     # 不设全局 security：/health、/auth/*、/references/search 等是匿名端点。
+    # FastAPI 自动生成的 ValidationError 会带上游 pydantic 版本的字段
+    # （实测 pydantic 2.14.2 只有 loc/msg/type，2.14.3 多了 ctx/input），
+    # 直接导出会让契约文件随依赖小版本漂移、一致性门在 CI 上假红。
+    # 这里固定成我们承诺的三字段形状——它本来就不是我们定义的契约内容。
+    schemas = (spec.setdefault("components", {})).setdefault("schemas", {})
+    if "ValidationError" in schemas:
+        schemas["ValidationError"] = {
+            "title": "ValidationError",
+            "type": "object",
+            "required": ["loc", "msg", "type"],
+            "properties": {
+                "loc": {"title": "Location", "type": "array",
+                        "items": {"anyOf": [{"type": "string"}, {"type": "integer"}]}},
+                "msg": {"title": "Message", "type": "string"},
+                "type": {"title": "Error Type", "type": "string"},
+            },
+            "description": "单个字段的校验错误。上游 pydantic 可能附加 ctx/input 等字段，"
+                           "契约只承诺 loc/msg/type 三项。",
+        }
+
     components = spec.setdefault("components", {})
     components.setdefault("securitySchemes", {})["BearerAuth"] = {
         "type": "http",

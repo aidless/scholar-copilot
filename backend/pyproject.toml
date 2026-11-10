@@ -4,7 +4,9 @@ version = "1.6.0"
 description = "开源学术写作 Copilot 后端（FastAPI + PostgreSQL + arq）"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115",
+    # 上界钉住：契约文件由 FastAPI 导出的 OpenAPI 决定，上游大版本改了 schema 形状
+    # 会让 openapi.yaml 漂移（CI 的一致性门会红）。升级需同时重新导出并复核。
+    "fastapi>=0.115,<0.163",
     "uvicorn[standard]>=0.30",
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",

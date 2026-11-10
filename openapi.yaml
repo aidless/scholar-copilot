@@ -2301,26 +2301,27 @@ components:
       - amount_cents
       title: TransferIn
     ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
+      title: ValidationError
       type: object
       required:
       - loc
       - msg
       - type
-      title: ValidationError
+      properties:
+        loc:
+          title: Location
+          type: array
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+        msg:
+          title: Message
+          type: string
+        type:
+          title: Error Type
+          type: string
+      description: 单个字段的校验错误。上游 pydantic 可能附加 ctx/input 等字段，契约只承诺 loc/msg/type 三项。
     VerifyIn:
       properties:
         items:

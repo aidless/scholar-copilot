@@ -237,6 +237,27 @@ SC_JWT_SECRET=change-me SC_LLM_PROVIDER=fake SC_SMS_DEV_MODE=true SC_DB_AUTO_CRE
 memory+arq 报警 / memory+inline 不报警。后两条是「不误杀」的反向断言——
 只报该报的，否则警告会被当噪音忽略。
 
+### CI 首轮假红：pydantic 小版本让契约漂移（已修）
+`export_openapi --check` 在 CI 上红：`openapi.yaml 与代码不一致`，但本地全绿。
+根因不是逻辑，是**依赖版本差**：CI 装的是 `fastapi 0.162.3` + `pydantic 2.14.3`，
+本机是 `fastapi 0.115.6` + `pydantic 2.14.2`；FastAPI 自动生成的 `ValidationError`
+schema 在 pydantic 2.14.3 多了 `ctx` / `input` 两个字段。
+
+```
+local(2.14.2)  properties: loc, msg, type
+ci  (2.14.3)  properties: ctx, input, loc, msg, type   ← 多 12 行差异
+```
+
+修法两层：
+1. 导出脚本把 `ValidationError` 规范化成**只承诺 `loc`/`msg`/`type`** 三字段
+   （它本来就不是我们定义的契约内容，是框架内部结构；上游加字段不该让我们的
+   契约文件变脏）。
+2. `backend/pyproject.toml` 给 fastapi 加上界 `>=0.115,<0.163`，并写明理由。
+
+验证：用 venv 装 `fastapi 0.162.2 + pydantic 2.14.3` 跑导出，与本机
+`fastapi 0.115.6 + pydantic 2.14.2` 的结果**逐字段完全一致**（`True`）；
+两版本跑 `tests/test_openapi_sync.py` 均 5 passed。
+
 ## 7. 未验证项（如实）
 - PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
   生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
