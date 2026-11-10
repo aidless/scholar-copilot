@@ -113,3 +113,32 @@ sha1(字典序排序 [token,timestamp,nonce])，事件 XML 是我们自造的标
 
 ### 测试数
 全套 `pytest` = **121 passed**（107 + 微信 14；openapi 一致性门 5 项本就存在，新增 3 个端点只需重导出规格，用例数不变，重导出后 5 项仍全绿）。
+
+---
+
+## 8. 导出 LaTeX 编译服务化（同日追加）
+
+### 为什么
+v1.3 起 `format=tex` 只能产出 `.tex` 源文件，用户还得自己在本地装 TeX 编译；
+`format=pdf` 走的是 docx→LibreOffice 路线。本轮补一条 **LaTeX 直接编译成 PDF** 的通道。
+
+### 实现
+- `backend/app/export/pdf.py` 新增 `tex_bytes_to_pdf(tex_bytes, timeout=300)`：
+  - 引擎探测 `xelatex` → `lualatex` → `pdflatex`（中文用 ctex，优先 xelatex）
+  - 临时目录写 `thesis.tex`，**编译两遍**解析交叉引用/目录；`-interaction=nonstopmode -halt-on-error` 防卡交互
+  - 第一遍失败且无 PDF → 抛 `RuntimeError` 带 TeX 日志尾部 400 字符；无引擎 → 抛 `RuntimeError("本机未安装 TeX 发行版…")`
+- `backend/app/routers/writing.py` 导出端点 `format` 白名单从 `^(docx|pdf|tex)$` 扩到 `^(docx|pdf|tex|latexpdf)$`；
+  `latexpdf` 分支 = `build_thesis_tex(...)` → `tex_bytes_to_pdf(...)`，`RuntimeError` → HTTP 502（文案提示改用 tex/docx）。
+- CI（`.github/workflows/ci.yml`）后端 job 的依赖安装段从「LibreOffice」扩成「LibreOffice + TeX」：
+  追加 `texlive-xetex texlive-lang-chinese texlive-latex-recommended`，让 `test_tex_real_compile` 在 CI 真实编译而非 skip。
+
+### 测试（`backend/tests/test_latex_compile.py`，5 项：4 跑 + 1 skip）
+- `test_no_engine_raises`：无引擎 → `RuntimeError` 且文案含「未安装 TeX」（**强断言**，不接受「LaTeX 编译失败」这条分支蒙混）
+- `test_engine_success_writes_and_returns_pdf`：monkeypatch 引擎存在 + 假 subprocess 写出 `thesis.pdf` → 返回 `%PDF-1.5` 字节
+- `test_engine_fail_no_pdf_raises`：引擎返回码非 0 且无产物 → `RuntimeError("LaTeX 编译失败…")`
+- `test_export_latexpdf_502_when_no_tex`：完整订单（下单→大纲→支付→逐章）导出 `format=latexpdf`，本机无 TeX → HTTP 502 且 detail 含「未安装 TeX」
+- `test_tex_real_compile`（`skipif` 无 TeX）：真实 ctexart 编译产出 `%PDF`；本机 skip，CI 装 texlive 后执行
+- **RED→GREEN 反证**：把 `if not engine: raise RuntimeError("未安装 TeX…")` 改成 `engine="/bin/true"` → `test_no_engine_raises` 与 `test_export_latexpdf_502_when_no_tex` 两项变红（证明断言真能区分「未安装」与「编译失败」两个分支）；恢复后全绿。
+
+### 未验证项
+- 本机无 TeX 发行版，真实编译只在 CI（装 texlive 后）执行；复杂模板（多级目录、大量交叉引用、参考文献 bibtex）未压测，当前只编译正文+披露表+免责声明的单文件。
