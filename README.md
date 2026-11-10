@@ -1,5 +1,11 @@
 # Scholar Copilot
 
+[![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
+![version](https://img.shields.io/badge/version-1.4.0-blue)
+![tests](https://img.shields.io/badge/tests-53%20passed-brightgreen)
+![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
+![node](https://img.shields.io/badge/node-20-339933)
+
 **开源的学术写作 Copilot**：文献检索 → 引用溯源 → 大纲/逐章辅助写作 → 引用/数字核查 → 多租户自部署。
 
 > 定位声明：这是一个**写作辅助工具**，不承诺「过查重」、不代写。所有 AI 参与的内容默认携带 A/B/C 三级参与度标记，符合生成式内容标识的合规方向。
@@ -28,13 +34,27 @@ frontend (Next.js)  ──HTTP──▶  backend (FastAPI)
                                  └─ PostgreSQL      ← deploy/init.sql（含租户/属主列约束）
 references 模块复用 paperKB (FAISS+SQLite) + paper_agent 证据链
 review 模块复用 review-workflow / tmaudit 的核查规则
+
+部署拓扑（`docker compose up` 起的五个容器，生成任务经 Redis 交给独立 worker）：
+
+```mermaid
+flowchart LR
+    U[浏览器] --> F[frontend<br/>Next.js :3000]
+    F -->|REST / WS| B[backend<br/>FastAPI :8000]
+    B -->|读写| P[(PostgreSQL)]
+    B -->|enqueue run_job_task| R[(Redis)]
+    R -->|BZPOPMIN| W[worker<br/>arq WorkerSettings]
+    W -->|写章节/大纲| P
+    W -->|调用| L[LLM Provider<br/>OpenAI 兼容]
+    B -->|调用| L
+```
 ```
 
 ## 快速开始
 
 ```bash
 cp .env.example .env          # 填 LLM_API_KEY 等
-docker compose up -d          # postgres + redis + backend + frontend
+docker compose up -d          # postgres + redis + backend + worker + frontend
 # backend http://localhost:8000/docs   frontend http://localhost:3000
 ```
 

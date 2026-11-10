@@ -1,4 +1,4 @@
-# 部署指南（v1.0）
+# 部署指南（v1.4）
 
 本仓库三种跑法：**Docker Compose 一键起**（推荐演示/小规模）、**本地开发**、**生产部署**。
 
@@ -17,8 +17,9 @@ compose 起来的东西：
 | 服务 | 端口 | 说明 |
 |---|---|---|
 | postgres | 5432 | 首次启动执行 `deploy/init.sql`；数据在 `pgdata` 卷 |
-| redis | 6379 | 预留给 v1.x 的 arq 任务队列 |
-| backend | 8000 | FastAPI，`SC_DB_AUTO_CREATE=true` 演示模式启动建表 |
+| redis | 6379 | arq 任务队列（`SC_TASK_QUEUE=arq`） |
+| backend | 8000 | FastAPI，`SC_DB_AUTO_CREATE=true` 演示模式启动建表；提交生成任务后入队 |
+| worker | — | `arq app.tasks.worker.WorkerSettings`，消费大纲/逐章/改写任务（无 HTTP 端口） |
 | frontend | 3000 | Next.js 15（`NEXT_PUBLIC_API_BASE` 指向后端） |
 
 > 演示模式用 `SC_DB_AUTO_CREATE=true` 免去迁移；**生产必须关掉并跑 alembic**（见 §3）。

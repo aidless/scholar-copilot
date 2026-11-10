@@ -31,6 +31,7 @@ services:
       SC_DATABASE_URL: postgresql+asyncpg://scholar:${POSTGRES_PASSWORD:-scholar}@postgres:5432/scholar
       SC_REDIS_URL: redis://redis:6379/0
       SC_DB_AUTO_CREATE: "true"   # 演示模式：启动建表；生产改为 false 并跑 alembic
+      SC_TASK_QUEUE: arq          # 生成任务交 worker 容器（也可改回 inline 单进程演示）
       SC_PRIMARY_DOMAIN: localhost:3000
       SC_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     depends_on:
@@ -39,6 +40,22 @@ services:
       redis:
         condition: service_healthy
     ports: ["8000:8000"]
+  worker:
+    build: ./backend
+    command: ["python", "-m", "arq", "app.tasks.worker.WorkerSettings"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SC_DATABASE_URL: postgresql+asyncpg://scholar:${POSTGRES_PASSWORD:-scholar}@postgres:5432/scholar
+      SC_REDIS_URL: redis://redis:6379/0
+      SC_TASK_QUEUE: arq          # 与 backend 共享队列，生成任务交独立 worker 进程
+      SC_DB_AUTO_CREATE: "false"  # 表由 backend 启动时创建，worker 只消费
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
   frontend:
     build:
       context: ./frontend
