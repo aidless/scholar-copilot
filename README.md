@@ -74,6 +74,12 @@ cd backend && pip install -e ".[dev]" && uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
+想把前端也灌上「一份写好的论文」再演示：
+
+```bash
+python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 DEMO_PHONE/DEMO_PASSWORD；订单可直接在 /workbench 打开
+```
+
 生产部署（迁移 / TLS / 限流 / 备份）与常见问题：见 [`docs/DEPLOY.md`](docs/DEPLOY.md)。
 
 > **启动自检**：后端启动时会逐条打印「配置看起来能跑、实际跑不通」的警告——
