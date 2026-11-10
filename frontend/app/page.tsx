@@ -13,6 +13,8 @@ export default function Home() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [logged, setLogged] = useState(false);
+  const [wxScene, setWxScene] = useState<string | null>(null);
+  const [wxMsg, setWxMsg] = useState<string | null>(null);
 
   useEffect(() => setLogged(!!tokenStore.get()), []);
 
@@ -35,6 +37,36 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function wechatLogin() {
+    setWxMsg(null);
+    try {
+      const r = await api<{ scene: string; mode: string; qr_url: string }>("/auth/wechat/qrcode", { method: "POST" });
+      setWxScene(r.scene);
+      setWxMsg(r.mode === "dev"
+        ? `开发模式：扫码会话 ${r.scene}（可在下方模拟确认）`
+        : "请使用微信扫码，完成后自动登录");
+      // 轮询（3 秒一次，最多 100 次）
+      for (let i = 0; i < 100; i++) {
+        await new Promise((res) => setTimeout(res, 3000));
+        const s = await api<{ status: string; access_token?: string }>(`/auth/wechat/poll?scene=${r.scene}`);
+        if (s.status === "confirmed" && s.access_token) {
+          tokenStore.set(s.access_token);
+          setLogged(true);
+          setWxMsg("扫码登录成功");
+          return;
+        }
+      }
+    } catch (err: any) { setWxMsg(`失败：${err.message}`); }
+  }
+
+  async function mockApprove() {
+    if (!wxScene) return;
+    try {
+      await api("/auth/wechat/mock-approve", { method: "POST", body: { scene: wxScene, phone } });
+      setWxMsg("已模拟确认，正在取 token…");
+    } catch (err: any) { setWxMsg(`失败：${err.message}`); }
   }
 
   return (
@@ -75,11 +107,26 @@ export default function Home() {
             <input className="w-full border rounded px-3 py-2 text-sm" placeholder="短信验证码（开发模式 000000）"
               value={code} onChange={(e) => setCode(e.target.value)} required />
           )}
+          <button type="button" onClick={wechatLogin}
+            className="w-full border rounded py-2 text-sm">微信扫码登录</button>
           <button disabled={busy} className="w-full bg-neutral-900 text-white rounded py-2 text-sm disabled:opacity-50">
             {busy ? "处理中…" : mode === "register" ? "注册并登录" : "登录"}
           </button>
           {msg && <p className="text-xs text-neutral-600">{msg}</p>}
         </form>
+      )}
+
+      {wxMsg && (
+        <div className="border rounded-lg p-4 text-sm space-y-2 max-w-md">
+          <p>{wxMsg}</p>
+          {wxScene && (
+            <div className="flex gap-2">
+              <input className="border rounded px-3 py-1 text-xs flex-1" placeholder="手机号（dev 模拟确认用）"
+                value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <button className="border rounded px-3 py-1 text-xs" onClick={mockApprove}>模拟扫码确认（dev）</button>
+            </div>
+          )}
+        </div>
       )}
 
       <section className="grid grid-cols-2 gap-4 text-sm">

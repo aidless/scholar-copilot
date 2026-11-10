@@ -145,3 +145,10 @@ arq app.tasks.worker.WorkerSettings
 端点据此把生成任务投递给 worker（返回 job_id，前端照旧轮询 `GET /jobs/{id}`）。
 默认 `inline` 单机即可用，无需 Redis。
 > 说明：本仓库已提供 arq 通道实现与投递单测；本机无 Redis，未做进程级联调（部署环境验证）。
+
+
+## v1.3 新增：LaTeX 导出与对账 CSV
+
+- `POST /writing/orders/{id}/export?format=tex` → `.tex`（ctexart，需 xelatex 编译；仓库不内置 TeX 发行版）。
+- `GET /admin/exports/{orders|payments|commissions|audit}.csv` → UTF-8 BOM CSV（Excel 直开不乱码），上限 5000 行，
+  每次导出写 `admin_audit_log`（action=`export.csv.<kind>`）。

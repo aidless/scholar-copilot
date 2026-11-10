@@ -7,12 +7,14 @@
 - 初始管理员密码从环境注入（SC_ADMIN_INITIAL_PASSWORD），空则不创建——
   没有默认口令，杜绝「admin/123456」式裸奔。
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
+import csv
+import io
 from datetime import datetime, timezone
 
 from ..models import (AdminAuditLog, AdminUser, Commission, Distributor,
@@ -298,3 +300,42 @@ async def audit_dist_transfer(transfer_id: str, action: str, db: AsyncSession = 
                  {"amount_cents": row.amount_cents, "distributor_id": row.distributor_id})
     await db.commit()
     return {"id": row.id, "status": row.status}
+
+
+# ---------------------------------------------------------------- CSV 导出（审计/对账）
+_CSV_KINDS = {
+    "orders": ("订单", ["id", "tenant_id", "owner_id", "title", "education", "word_count",
+                       "price_cents", "status", "paid_at", "created_at"]),
+    "payments": ("支付", ["id", "serial_no", "order_id", "amount_cents", "pay_method",
+                         "status", "provider_ref", "created_at", "paid_at"]),
+    "commissions": ("佣金", ["id", "distributor_id", "order_id", "order_amount_cents",
+                            "rate_bps", "amount_cents", "status", "created_at", "settled_at"]),
+    "audit": ("审计", ["id", "admin_id", "action", "created_at"]),
+}
+
+
+@router.get("/exports/{kind}.csv")
+async def export_csv(kind: str, db: AsyncSession = Depends(get_db),
+                     admin: CurrentUser = Depends(admin_user)):
+    """对账/审计 CSV（UTF-8 BOM，Excel 直接打开不乱码）。"""
+    if kind not in _CSV_KINDS:
+        raise HTTPException(404, f"不支持的导出类型：{kind}")
+    label, fields = _CSV_KINDS[kind]
+    model = {"orders": WritingOrder, "payments": PaymentOrder,
+             "commissions": Commission, "audit": AdminAuditLog}[kind]
+    rows = (await db.execute(select(model).order_by(model.created_at.desc()).limit(5000))).scalars().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(fields)
+    for r in rows:
+        vals = []
+        for f in fields:
+            v = getattr(r, f, None)
+            vals.append(v.isoformat() if hasattr(v, "isoformat") and v else ("" if v is None else v))
+        writer.writerow(vals)
+    await _audit(db, admin, f"export.csv.{kind}", {"rows": len(rows)}, {})
+    await db.commit()
+    data = ("\ufeff" + buf.getvalue()).encode("utf-8")
+    return Response(content=data, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{kind}.csv"'})

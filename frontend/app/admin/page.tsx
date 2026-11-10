@@ -129,6 +129,17 @@ export default function Admin() {
       </section>
 
       <section className="space-y-2">
+        <h2 className="font-medium">对账导出（CSV）</h2>
+        <div className="flex gap-2 text-xs">
+          {(["orders", "payments", "commissions", "audit"] as const).map((k) => (
+            <button key={k} className="border rounded px-3 py-1" onClick={() => downloadCsv(k)}>
+              {k}.csv
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-2">
         <h2 className="font-medium">审计日志</h2>
         <ul className="text-xs space-y-1">
           {audit.length === 0 && <li className="text-neutral-400">暂无记录</li>}
@@ -141,6 +152,15 @@ export default function Admin() {
       </section>
     </main>
   );
+
+  async function downloadCsv(kind: string) {
+    const res = await api<Response>(`/admin/exports/${kind}.csv`, { admin: true, raw: true });
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${kind}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
 }
 
 function Card({ label, value }: { label: string; value: number | string }) {

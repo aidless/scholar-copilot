@@ -315,7 +315,7 @@ async def rewrite_chapter(order_id: str, node_id: str, body: RewriteIn | None = 
 
 @router.post("/orders/{order_id}/export")
 async def export_order(order_id: str, profile: str = Query(default="default"),
-                       fmt: str = Query(default="docx", alias="format", pattern="^(docx|pdf)$"),
+                       fmt: str = Query(default="docx", alias="format", pattern="^(docx|pdf|tex)$"),
                        db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(current_user)):
     order = await _get_owned_order(db, user, order_id)
@@ -345,7 +345,16 @@ async def export_order(order_id: str, profile: str = Query(default="default"),
         except KeyError:
             raise HTTPException(
                 422, f"未知格式 profile：{profile}；可用值见 GET /formatting/profiles") from None
-    if fmt == "pdf":
+    if fmt == "tex":
+        from ..export.latex import build_thesis_tex
+        data = build_thesis_tex(
+            title=order.title, education=order.education,
+            chapters=[{"title": c.title, "word_count": c.word_count, "ai_level": c.ai_level,
+                       "content_md": c.content_md} for c in chapters],
+            language=order.language)
+        media = "application/x-tex"
+        filename = quote(f"{order.title}.tex")
+    elif fmt == "pdf":
         from ..export.pdf import docx_bytes_to_pdf
         try:
             data = docx_bytes_to_pdf(data)
