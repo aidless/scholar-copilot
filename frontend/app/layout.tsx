@@ -7,9 +7,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-white text-neutral-900 antialiased">
         <nav className="border-b px-6 py-3 flex gap-6 text-sm">
           <a href="/" className="font-semibold">Scholar Copilot</a>
-          <a href="/editor">写作台</a>
+          <a href="/workbench">写作台</a>
           <a href="/references">文献溯源</a>
-          <a href="/review">核查报告</a>
+          <a href="/review">文本体检</a>
           <a href="/admin" className="text-neutral-400">管理台</a>
         </nav>
         {children}
