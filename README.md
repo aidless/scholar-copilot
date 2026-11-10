@@ -73,6 +73,7 @@ cd frontend && npm install && npm run dev
 |---|---|
 | 暴力破解 | 登录/注册按 IP 限流（默认 20 次/分），429 + `Retry-After`；密码统一 401 文案防枚举 |
 | LLM 成本滥用 | `/tools/rewrite`、`/tools/detect` 单独限额（默认 10 次/分） |
+| 多实例限流失效 | `SC_RATE_LIMIT_BACKEND=redis` 时用 Redis sorted set 共享计数（compose 默认开启）；Redis 不可用降级进程内并打警告，不 500 |
 | 前端越权调用 | CORS 白名单（`SC_CORS_ORIGINS`），非白名单来源无 `Access-Control-Allow-Origin` |
 | prompt 注入 | 用户文本一律 `wrap_untrusted()` 包裹：边界声明 + 哨兵中和（`<<<`/`>>>`/围栏/哨兵词），有逃逸单测 |
 | 数据库演进 | alembic 迁移（`migrations/versions/64bfd6724d4e`），生产 `SC_DB_AUTO_CREATE=false` |

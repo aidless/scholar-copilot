@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     admin_initial_password: str = ""
 
     # v1.0 限流（进程内滑动窗口；多实例部署应换 Redis 实现）
+    # 限流后端：memory（进程内，单实例）/ redis（共享计数，多实例部署必选）
+    rate_limit_backend: str = "memory"
     rate_limit_login_per_minute: int = 20
     rate_limit_llm_per_minute: int = 10
     rate_limit_search_per_minute: int = 30

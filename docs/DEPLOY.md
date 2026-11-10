@@ -22,6 +22,9 @@ compose 起来的东西：
 | worker | — | `arq app.tasks.worker.WorkerSettings`，消费大纲/逐章/改写任务（无 HTTP 端口） |
 | frontend | 3000 | Next.js 15（`NEXT_PUBLIC_API_BASE` 指向后端） |
 
+> **限流**：compose 默认 `SC_RATE_LIMIT_BACKEND=redis`（多容器共享计数）。单进程本地跑可改 `memory`；
+> 改成 Redis 后配额是「整个部署共享 N 次/分」，不是「每个容器 N 次/分」。Redis 挂掉会降级为进程内并打警告。
+
 > schema 只有一条真相源：alembic。`SC_DB_AUTO_CREATE` 默认 false，仅本地零依赖试跑（SQLite）时才置 true。
 > 改模型后必须补迁移，否则 `tests/test_migrations_match_models.py` 会红（空库真跑迁移再逐列比对）。
 

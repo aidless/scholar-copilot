@@ -35,6 +35,8 @@ services:
       SC_REDIS_URL: redis://redis:6379/0
       SC_DB_AUTO_CREATE: "false"  # 表由上面的 alembic upgrade head 建，不靠 create_all
       SC_TASK_QUEUE: arq          # 生成任务交 worker 容器（也可改回 inline 单进程演示）
+      # 多容器共享同一 Redis，限流必须走 Redis 计数，否则配额 = 配置值 × 容器数
+      SC_RATE_LIMIT_BACKEND: redis
       SC_PRIMARY_DOMAIN: localhost:3000
       SC_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     depends_on:
