@@ -12,12 +12,13 @@ from ..citecheck import verify_citation as check_citation
 from ..db import get_db
 from ..litsearch import search_literature
 from ..models import ReferenceItem, WritingOrder
+from ..ratelimit import rate_limit_search
 from ..tenancy import CurrentUser, current_user, ownership_filter
 
 router = APIRouter(prefix="/references", tags=["references"])
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(rate_limit_search)])
 async def search(q: str = Query(min_length=2, max_length=200), limit: int = 8,
                  db: AsyncSession = Depends(get_db)):
     del db  # 检索无库依赖，保留签名一致性

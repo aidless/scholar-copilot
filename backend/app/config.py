@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     admin_initial_login: str = "admin"
     admin_initial_password: str = ""
 
+    # v1.0 限流（进程内滑动窗口；多实例部署应换 Redis 实现）
+    rate_limit_login_per_minute: int = 20
+    rate_limit_llm_per_minute: int = 10
+    rate_limit_search_per_minute: int = 30
+
+    # CORS 白名单（逗号分隔；默认本地开发地址，生产必须显式收紧）
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     model_config = {"env_file": ".env", "env_prefix": "SC_"}
 
 

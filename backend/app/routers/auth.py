@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_db
 from ..models import User
+from ..ratelimit import rate_limit_login
 from ..security import hash_password, make_token, verify_password, verify_sms_code
 from ..tenancy import CurrentUser, current_user
 from ..writing.service import quota_remaining
@@ -35,7 +36,7 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
-@router.post("/register", response_model=TokenOut)
+@router.post("/register", response_model=TokenOut, dependencies=[Depends(rate_limit_login)])
 async def register(body: RegisterIn, db: AsyncSession = Depends(get_db)):
     if not re.fullmatch(r"1\d{10}", body.phone):
         raise HTTPException(422, "手机号格式不正确")
@@ -56,7 +57,7 @@ async def register(body: RegisterIn, db: AsyncSession = Depends(get_db)):
     return TokenOut(access_token=make_token(user.id, user.tenant_id))
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login", response_model=TokenOut, dependencies=[Depends(rate_limit_login)])
 async def login(body: LoginIn, db: AsyncSession = Depends(get_db)):
     user = (await db.execute(
         select(User).where(User.phone == body.phone)

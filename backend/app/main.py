@@ -2,20 +2,21 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import settings
 
 from . import tenancy
 from .routers import (admin, auth, billing, formatting, jobs, payments,
                       references, review, tools, writing)
 
-VERSION = "0.5.0"
+VERSION = "1.0.0"
 OPENAPI_PATH = "/docs"
 
 
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        from .config import settings
-
         if settings.db_auto_create:
             from .db import _engine_and_session, Base
             import app.models  # noqa: F401——注册 metadata
@@ -42,6 +43,17 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Scholar Copilot", version=VERSION,
                   description="开源学术写作 Copilot（多租户自部署）",
                   lifespan=lifespan)
+    # CORS 白名单（显式配置，默认只放本地开发地址；不要用 "*" 配 cookie 认证）
+    _origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+    if _origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["Content-Disposition"],
+        )
     app.include_router(auth.router)
     app.include_router(writing.router)
     app.include_router(references.router)

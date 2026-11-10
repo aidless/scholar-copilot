@@ -11,7 +11,9 @@ from pydantic import BaseModel, Field
 
 from ..db import get_db
 from ..llm.registry import get_provider
+from ..ratelimit import rate_limit_llm
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt
+from ..prompts.safety import wrap_untrusted
 
 router = APIRouter(prefix="/tools", tags=["tools"])
 
@@ -29,12 +31,12 @@ class RewriteIn(BaseModel):
     instruction: str = Field(default="", max_length=500)
 
 
-@router.post("/rewrite")
+@router.post("/rewrite", dependencies=[Depends(rate_limit_llm)])
 async def rewrite(body: RewriteIn):
     """粘贴文本降重/改写（不落库）。"""
     provider = get_provider()
     result = await provider.complete(
-        build_rewrite_user_prompt(body.text, body.instruction),
+        build_rewrite_user_prompt(wrap_untrusted(body.text, "待改写正文"), body.instruction),
         system=REWRITE_SYSTEM_PROMPT, max_tokens=8192,
     )
     return {
@@ -61,7 +63,7 @@ def _top_repeats(text: str, n: int = 8, k: int = 3) -> list[dict]:
             for g, c in grams.most_common(60) if c > 1][:k]
 
 
-@router.post("/detect")
+@router.post("/detect", dependencies=[Depends(rate_limit_llm)])
 async def detect(body: DetectIn):
     """文本体检：可测量特征 + 启发式提示。非查重、非 AIGC 检测，结论仅供参考。"""
     text = body.text

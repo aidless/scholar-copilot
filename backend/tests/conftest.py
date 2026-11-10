@@ -31,6 +31,8 @@ def fresh_db():
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
+    from app.ratelimit import reset_all
+    reset_all()
     asyncio.run(_reset())
     yield
     asyncio.run(_reset())
