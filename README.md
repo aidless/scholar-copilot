@@ -45,6 +45,19 @@ cd backend && pip install -e ".[dev]" && uvicorn app.main:app --reload
 cd frontend && npm install && npm run dev
 ```
 
+生产部署（迁移 / TLS / 限流 / 备份）与常见问题：见 [`docs/DEPLOY.md`](docs/DEPLOY.md)。
+
+## 工程加固（v1.0）
+
+| 项 | 做法 |
+|---|---|
+| 暴力破解 | 登录/注册按 IP 限流（默认 20 次/分），429 + `Retry-After`；密码统一 401 文案防枚举 |
+| LLM 成本滥用 | `/tools/rewrite`、`/tools/detect` 单独限额（默认 10 次/分） |
+| 前端越权调用 | CORS 白名单（`SC_CORS_ORIGINS`），非白名单来源无 `Access-Control-Allow-Origin` |
+| prompt 注入 | 用户文本一律 `wrap_untrusted()` 包裹：边界声明 + 哨兵中和（`<<<`/`>>>`/围栏/哨兵词），有逃逸单测 |
+| 数据库演进 | alembic 迁移（`migrations/versions/64bfd6724d4e`），生产 `SC_DB_AUTO_CREATE=false` |
+| 交付形态 | 后端/前端 Dockerfile + compose 一键起；CI 跑 pytest + 空库迁移 + 前端 build |
+
 ## 与已有资产的关系
 
 见 [`docs/PORTING.md`](docs/PORTING.md)——本仓库是多个已有仓库（thesis_auto_generator / paper_agent / paperKB / review-workflow / tmaudit 等）的整合层，不是从零重写。
@@ -56,7 +69,8 @@ cd frontend && npm install && npm run dev
 - [x] v0.3 文献检索 + 在线工具：真实查库推荐（OpenAlex 主源 / Crossref 备源 + TTL 缓存，每条带 DOI 可复核，对照闭源产品「百分百真实」口头承诺）、选定文献挂单、粘贴降重改写（LLM）、启发式文本体检（套话/引用密度/重复片段，诚实定性——绝不输出伪精确的「查重率/AIGC 率」）；21 项测试 + 真模型冒烟通过
 - [x] v0.4 引用真实性核查 + 格式排版：逐条/批量核查（DOI 直查 + 标题模糊匹配 → verified/suspicious/fake 三态，全带命中证据，不闭环绝不装 verified）；导出支持格式 profile（本科/硕士/博士/英文通用档案，参数透明可查 GET /formatting/profiles）；25 项测试 + 真实 Crossref 核查冒烟通过
 - [x] v0.5 支付订单 + 多租户管理端：支付单（服务端价/serial 追踪/mock 网关确认，manual 模式管理员确认，真实商户 webhook 预留 v1.0）；正文生成 402 支付门（大纲免费 3 次）；管理端 JWT RBAC（superadmin/tenant_admin/operator，初始密码仅环境注入、无默认口令）+ 用户/订单/支付/营收统计 + 配额赠送回收（append-only 台账 is_usage 双类行）+ 全动作审计日志；30 项测试 + 真模型支付解锁冒烟通过
-- [ ] v1.0 一键自部署文档 + demo 站 + 真实商户回调
+- [x] v1.0 工程加固（可一键自部署）：Dockerfile×2 + docker-compose（healthcheck/依赖顺序/env 内联）+ alembic 初始迁移（10 表，空库 upgrade head 通过）+ 三层限流（登录/LLM/检索，429+Retry-After）+ CORS 白名单 + prompt 注入结构化定界（哨兵+中和，含逃逸单测）+ GitHub Actions CI（后端 pytest + alembic 落地 + 前端 typecheck/build）+ 真正可用的 Web UI（登录/写作台/文献/体检/管理台 6 路由）+ `docs/DEPLOY.md`；34 项测试通过、容器内 /health 与注册冒烟通过
+- [ ] v1.1 计划：智能绘图 / AI PPT 两条产品线、分销代理体系、微信扫码登录 + 真实短信网关、arq 队列 worker（现为进程内任务）、PDF/LaTeX 导出、OpenAlex 带 key 提高配额
 
 ## 学术诚信
 
