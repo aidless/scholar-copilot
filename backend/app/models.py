@@ -26,6 +26,8 @@ class User(Base):
     tenant_id = Column(String(64), nullable=False, default="primary", index=True)
     phone = Column(String(20), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
+    # 微信 openid（扫码登录后绑定；绑定后再次扫码可免密登录）
+    wechat_openid = Column(String(64), unique=True, index=True)
     created_at = Column(DateTime(timezone=True), default=_now)
 
 
@@ -317,6 +319,8 @@ class WechatScene(Base):
     scene = Column(String(64), nullable=False, unique=True, index=True)
     status = Column(String(16), nullable=False, default="pending")  # pending/confirmed/expired
     user_id = Column(String(32))
+    # 扫码来源的 openid（微信回调事件里带；用于首次绑定 wechat_openid）
+    openid = Column(String(64), index=True)
     tenant_id = Column(String(64), nullable=False, default="primary")
     created_at = Column(DateTime(timezone=True), default=_now)
     confirmed_at = Column(DateTime(timezone=True))

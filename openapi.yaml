@@ -186,6 +186,130 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /auth/wechat/callback:
+    get:
+      tags:
+      - auth
+      summary: Wechat Callback Verify
+      description: 微信服务器 URL 校验握手：验签通过把 echostr 原样返回（纯文本）。
+      operationId: wechat_callback_verify_auth_wechat_callback_get
+      parameters:
+      - name: signature
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Signature
+      - name: timestamp
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Timestamp
+      - name: nonce
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Nonce
+      - name: echostr
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Echostr
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    post:
+      tags:
+      - auth
+      summary: Wechat Callback Event
+      description: 接收微信事件推送：解析 → 关联扫码会话。成功回 "success"（微信要求）。
+      operationId: wechat_callback_event_auth_wechat_callback_post
+      parameters:
+      - name: signature
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Signature
+      - name: timestamp
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Timestamp
+      - name: nonce
+        in: query
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Nonce
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /auth/wechat/complete:
+    post:
+      tags:
+      - auth
+      summary: Wechat Complete
+      description: '扫码后完成登录：用 openid 找到/创建用户并确认会话（真实网关下前端调用）。
+
+
+        dev 模式亦可用来模拟真实回调后的绑定（与 mock-approve 的区别：这条走 openid）。'
+      operationId: wechat_complete_auth_wechat_complete_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders:
     post:
       tags:

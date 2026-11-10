@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-1.7.0-blue)
-![tests](https://img.shields.io/badge/tests-107%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-121%20passed-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
 
@@ -132,7 +132,8 @@ python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 
 - [x] v1.6 检索与进度体验：文献源扩到四源（新增 PubMed E-utilities 两步检索 esearch→esummary，可 `SC_PUBMED_ENABLED` 关掉，配 `SC_PUBMED_API_KEY` 从 3 req/s 提到 10 req/s）；写作台任务进度接 WebSocket（`useJobProgress`，WS 建不起来自动降级 2 秒轮询，进度条显示传输方式）；引用核查补查链扩到 Crossref→S2→PubMed（首源达阈值即停，不浪费配额）；`openapi.yaml` 改为从 FastAPI 导出并加一致性门（改了端点没重新导出就红，CI 里也挡）；启动自检把「配置看起来能跑、实际跑不通」前置到启动日志（缺密钥/开发模式/mock 支付/默认 JWT/双真相源/多进程限流）；`scripts/demo_local.sh` 一键演示（30 秒不用 Docker 不用密钥跑完整流程）；worker 健康检查修正（探 HTTP 导致永久 unhealthy 的假警报）；98 项测试通过
 - [x] v1.6.1 前端样式修复：`app/layout.tsx` 漏 `import "./globals.css"` 导致 Tailwind 根本没加载（headless 截图暴露：整站渲染成裸 HTML）——补上并重 build 验证 CSS 产物 11,993 字节、登录/写作台/体检/管理台四页截图入库 `docs/screenshots/`，README 加「界面预览」
 - [x] v1.7 运营闭环（邮件通道）：日报推送支持 SMTP 邮件第二通道——`SC_REPORT_WEBHOOK_URL` 为空且 `SC_REPORT_EMAIL_TO` 非空时自动走邮件（webhook 优先），支持 STARTTLS/SSL/登录，收件人逗号分隔；发信失败软返回不刷屏；配置齐全时 arq cron 同一份 `summary` 口径双通道复用；107 项测试通过（含邮件通道选择/优先级/软失败/邮件头 5 项 + 真网络假 SMTP 收信实测）
-- [ ] v1.7 计划（余）：导出 LaTeX 编译服务化、微信真实回调网关
+- [x] v1.7 微信真实回调网关：`GET/POST /auth/wechat/callback` 验签（sha1 排序拼接 + `hmac.compare_digest`）+ 事件 XML 解析（subscribe/SCAN → scene 转 scanned/confirmed）+ `POST /auth/wechat/complete` 建号绑定 openid；`users.wechat_openid`/`wechat_scenes.openid` 两列（alembic a7c1e2d4f6b8）；未配 Token/签名错一律 403；14 项测试 + RED→GREEN 反证
+- [ ] v1.7 计划（余）：导出 LaTeX 编译服务化
 
 ## 学术诚信
 

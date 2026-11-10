@@ -187,3 +187,101 @@ async def wechat_poll(scene: str, db: AsyncSession = Depends(get_db)):
         return {"status": "confirmed", "access_token": make_token(user.id, user.tenant_id),
                 "token_type": "bearer"}
     return {"status": ws.status}
+
+
+# ── 微信真实回调网关（公众号/服务号「服务器配置」指向此处） ──────────────────
+# GET：微信校验 URL，验签通过原样回 echostr。
+# POST：微信推送事件（用户扫带参二维码 subscribe/SCAN），验签 + 解析 XML →
+#       把对应 scene 标成 scanned 并记 openid；若该 openid 已绑定用户则直接 confirmed。
+
+from fastapi import Request, Response  # noqa: E402
+from .. import wechat as wx  # noqa: E402
+
+
+def _wx_verify_or_403(signature: str, timestamp: str, nonce: str) -> None:
+    """统一验签入口：Token 未配置或签名不符一律 403（不给探测者任何差分信息）。"""
+    if not settings.wechat_token:
+        raise HTTPException(503, "微信回调未配置（需 SC_WECHAT_TOKEN）")
+    if not wx.verify_signature(settings.wechat_token, signature, timestamp, nonce):
+        raise HTTPException(403, "签名校验失败")
+
+
+@router.get("/wechat/callback")
+async def wechat_callback_verify(
+    signature: str = "", timestamp: str = "", nonce: str = "", echostr: str = ""
+):
+    """微信服务器 URL 校验握手：验签通过把 echostr 原样返回（纯文本）。"""
+    _wx_verify_or_403(signature, timestamp, nonce)
+    return Response(content=echostr, media_type="text/plain")
+
+
+@router.post("/wechat/callback")
+async def wechat_callback_event(
+    request: Request,
+    signature: str = "",
+    timestamp: str = "",
+    nonce: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """接收微信事件推送：解析 → 关联扫码会话。成功回 "success"（微信要求）。"""
+    _wx_verify_or_403(signature, timestamp, nonce)
+    body = await request.body()
+    try:
+        ev = wx.parse_event(body)
+    except ValueError:
+        raise HTTPException(400, "事件解析失败")
+
+    # 只处理扫码相关事件：subscribe（未关注扫码）/ SCAN（已关注扫码）
+    scene = wx.extract_scene(ev.get("event_key", ""))
+    if ev.get("event") in ("subscribe", "SCAN") and scene:
+        ws = (await db.execute(
+            select(WechatScene).where(WechatScene.scene == scene)
+        )).scalars().first()
+        if ws is not None and ws.status == "pending":
+            openid = ev.get("from_user", "")
+            ws.openid = openid or ws.openid
+            # 该 openid 已经绑定过用户 → 直接完成登录
+            bound = (await db.execute(
+                select(User).where(User.wechat_openid == openid)
+            )).scalars().first() if openid else None
+            if bound is not None:
+                ws.status = "confirmed"
+                ws.user_id = bound.id
+                ws.confirmed_at = datetime.now(timezone.utc)
+            else:
+                ws.status = "scanned"  # 已扫，待前端走绑定手机号/或直接建号
+            await db.commit()
+
+    # 微信要求 5 秒内回 "success"（空串也行），否则重试
+    return Response(content="success", media_type="text/plain")
+
+
+@router.post("/wechat/complete")
+async def wechat_complete(body: dict, db: AsyncSession = Depends(get_db)):
+    """扫码后完成登录：用 openid 找到/创建用户并确认会话（真实网关下前端调用）。
+
+    dev 模式亦可用来模拟真实回调后的绑定（与 mock-approve 的区别：这条走 openid）。
+    """
+    scene = (body or {}).get("scene", "")
+    phone = (body or {}).get("phone", "")
+    ws = (await db.execute(select(WechatScene).where(WechatScene.scene == scene))).scalars().first()
+    if ws is None:
+        raise HTTPException(404, "扫码会话不存在")
+    if ws.status == "confirmed" and ws.user_id:
+        user = await db.get(User, ws.user_id)
+    else:
+        if not re.fullmatch(r"1\d{10}", str(phone)):
+            raise HTTPException(422, "手机号格式不正确")
+        user = (await db.execute(select(User).where(User.phone == phone))).scalars().first()
+        if user is None:
+            user = User(phone=phone, password_hash=hash_password(uuid.uuid4().hex), tenant_id="primary")
+            db.add(user)
+            await db.flush()
+        if ws.openid and not user.wechat_openid:
+            user.wechat_openid = ws.openid
+        ws.status = "confirmed"
+        ws.user_id = user.id
+        ws.confirmed_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"status": "confirmed", "access_token": make_token(user.id, user.tenant_id),
+            "token_type": "bearer"}

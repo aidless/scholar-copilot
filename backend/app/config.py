@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     task_queue: str = "inline"         # inline（asyncio）| arq（Redis 队列，多实例部署用）
     wechat_app_id: str = ""            # 扫码登录（生产需填，空则只有 dev mock 可用）
     wechat_app_secret: str = ""
+    # 公众号/服务号「服务器配置」里的 Token，用于校验微信回调签名（GET echostr 与 POST 事件）
+    wechat_token: str = ""
 
     # 文献源凭据（可选）：OpenAlex 带 mailto 进「礼貌池」配额更稳；S2 key 提高限额
     openalex_mailto: str = ""

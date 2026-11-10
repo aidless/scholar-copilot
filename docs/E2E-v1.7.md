@@ -77,3 +77,39 @@ Content-Type: text/plain; charset="utf-8"
   只验了协议层（STARTTLS/SSL/login 分支按参数走），生产接入需用户自备账号。
 - 附件/HTML 正文未做（当前纯文本，满足 IM/邮件告警场景）。
 - 大批量收件人（>10）的收信方限流未压测。
+
+---
+
+## 7. 微信真实回调网关（同日追加）
+
+### 为什么
+v1.2 的微信扫码登录只有 dev mock 一条路：`/wechat/mock-approve` 直接改库。
+生产上走不通——真实链路是「微信服务器回调 → 验签 → 解析事件 → 推进扫码会话」。
+本轮补上这条真实网关，**不需要真公众号即可实现并测试**：签名算法是公开的
+sha1(字典序排序 [token,timestamp,nonce])，事件 XML 是我们自造的标准报文。
+
+### 实现
+- `backend/app/wechat.py`（纯计算，无网络无 DB，易测）：
+  - `compute_signature(token, timestamp, nonce)` = `sha1("".join(sorted([token,ts,nonce])))`
+  - `verify_signature(...)` 用 `hmac.compare_digest` 常数时间比对
+  - `parse_event(xml_bytes)` → 扁平 dict（to_user/from_user/msg_type/event/event_key/content/msg_id），解析失败抛 `ValueError`
+  - `extract_scene(event_key)`：`qrscene_abc` → `abc`
+- `backend/app/routers/auth.py` 新增 3 端点：
+  - `GET /auth/wechat/callback?signature&timestamp&nonce&echostr`：URL 校验握手，验签通过原样回 `echostr`（纯文本）
+  - `POST /auth/wechat/callback?...`：接收事件推送，验签 → 解析 → 扫码事件（subscribe/SCAN）把对应 scene 从 `pending` 转 `scanned` 并记 `openid`；若该 openid 已绑定用户则直接 `confirmed`；恒回 `"success"`
+  - `POST /auth/wechat/complete`：扫码后完成登录（用手机号建号/找号 + 绑定 openid + 确认会话，返回 token）
+- 模型/迁移：`users.wechat_openid`（唯一，扫码绑定后免密登录）、`wechat_scenes.openid`；alembic `a7c1e2d4f6b8`（revises `ff5854424543`）；`deploy/init.sql` 同步
+- 配置：`SC_WECHAT_TOKEN`（未配置时回调端点 503，不静默）
+
+### 安全要点
+- 未配 Token / 签名不符 → **一律 403**，不给探测者任何差分（谁都能打这个公网回调，必须先把门关死）
+- 事件 XML 视为不可信输入：ElementTree 默认不展开外部实体，且我们不调用任何加载外部 DTD 的接口；解析失败 → 400
+- 只处理 `pending` 状态的 scene（重复事件幂等，不会覆盖已确认会话）
+
+### 测试（`backend/tests/test_wechat_callback.py`，14 项）
+- 纯函数 5 项：签名与官方算法一致 / 验签 true·false / extract_scene 前缀剥离 / parse_event 字段 / 坏 XML 抛错
+- 路由 9 项：URL 校验回 echostr / 签名错 403 / 未配 Token 503 / 事件签名错 403 / 扫码事件 → scanned / complete 建号绑定 → confirmed / **已绑定 openid 二次扫码自动登录** / 手机号非法 422 / scene 不存在 404
+- **RED→GREEN 反证**：把 `verify_signature` 改成恒 `return True` → 3 项签名相关测试变红（`test_verify_signature_true_and_false` / `test_callback_get_bad_signature_403` / `test_event_scan_bad_signature_403`）；恢复后 14 项全绿。
+
+### 测试数
+全套 `pytest` = **121 passed**（107 + 微信 14；openapi 一致性门 5 项本就存在，新增 3 个端点只需重导出规格，用例数不变，重导出后 5 项仍全绿）。

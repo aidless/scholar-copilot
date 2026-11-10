@@ -42,6 +42,7 @@ CREATE TABLE users (
     phone         text NOT NULL,
     pass_hash     text NOT NULL,                    -- bcrypt，服务端算（原产品客户端 MD5 直传）
     display_name  text,
+    wechat_openid text UNIQUE,                      -- 扫码绑定后免密登录
     invitee_id    uuid REFERENCES users(id),        -- 分销链
     commission_bp int  NOT NULL DEFAULT 500,        -- 佣金基点(bp)，5%=500；透明可查
     status        text NOT NULL DEFAULT 'active',   -- active / banned
@@ -317,7 +318,9 @@ CREATE TABLE IF NOT EXISTS wechat_scenes (
     scene        VARCHAR(64) NOT NULL UNIQUE,
     status       VARCHAR(16) NOT NULL DEFAULT 'pending',
     user_id      VARCHAR(32),
+    openid       VARCHAR(64),
     tenant_id    VARCHAR(64) NOT NULL DEFAULT 'primary',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     confirmed_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS ix_wechat_scenes_openid ON wechat_scenes (openid);
