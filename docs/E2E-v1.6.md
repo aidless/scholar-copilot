@@ -72,8 +72,7 @@ frame: done 100 {'version': 1, 'chapters': 5}
 前端构建：8 路由通过，`/workbench` 4.03 kB（接入 hook 后 +1.7 kB），
 First Load JS 107 kB。
 
-
-## 2b. 引用核查接 PubMed 交叉（第三源）
+## 3. 引用核查接 PubMed 交叉（第三源）
 
 ### 改动（`app/citecheck.py`）
 - 新增 `_pubmed_title`：与 litsearch 同款两步（esearch → esummary），DOI 从 `articleids` 挑。
@@ -102,7 +101,57 @@ verify_citation("这是一个完全编造的中文标题量子计算与诗意") 
 
 RED 反证：删掉 `if best_sim >= _TITLE_MATCH: break` → 「首源已 verified 不再补查」变红。
 
-## 3. 未验证项（如实）
+## 4. compose worker 健康检查修复 + arq 队列在 compose 栈上实测
+
+### 问题（实测发现）
+`docker ps` 里 `sce2e-worker-1` 一直是 **unhealthy**（FailingStreak=64），
+但 worker 实际在正常消费任务——**假警报**。根因：`backend/Dockerfile` 里的
+`HEALTHCHECK` 探的是 `http://127.0.0.1:8000/health`，而 worker 容器用 compose 的
+`command` 覆盖成 `python -m arq ...`，**根本不监听 HTTP 端口**。
+
+假警报的危害不只是难看：`depends_on: condition: service_healthy` 的下游服务
+（例如以后加的前端 SSR 或定时备份）会被永久卡住不启动。
+
+### 修法（两轮）
+1. 第一版用 `pgrep -f 'arq app.tasks.worker.WorkerSettings'` → 实测
+   `/bin/sh: 1: pgrep: not found`：`python:3.12-slim` 不带 procps（`ps` 也没有）。
+2. 改为纯 python 读 `/proc/*/cmdline` 自查，零额外依赖：
+   ```yaml
+   healthcheck:
+     test: ["CMD-SHELL", "python -c \"import glob,sys; sys.exit(0 if any(b'arq' in open(f,'rb').read() for f in glob.glob('/proc/[0-9]*/cmdline')) else 1)\""]
+     interval: 15s
+     timeout: 3s
+     start_period: 20s
+     retries: 3
+   ```
+
+### 验证
+```
+docker inspect sce2e-worker-1 --format '{{.State.Health.Status}} FailingStreak={{.State.Health.FailingStreak}}'
+→ healthy FailingStreak=0
+```
+
+### arq 队列在 compose 栈上真跑（不只是 fakeredis）
+```
+POST /writing/orders/{id}/outline  → job e6bc2c2a97854874813dd1b876cfa128 queued
+轮询 → done 100 {'version': 1, 'chapters': 5}  model=fake-model
+chapters: 5
+
+docker logs sce2e-worker-1:
+14:14:34:   0.49s → 9f76dcb3…:run_job_task('e6bc2c2a97854874813dd1b876cfa128')
+14:14:35:   0.92s ← 9f76dcb3…:run_job_task ● {'job_id': '…', 'worker': '?'}
+
+docker exec sce2e-redis-1 redis-cli KEYS 'arq:*'
+→ arq:result:…, arq:queue:health-check
+```
+即：**backend 只入队、独立 worker 进程消费**，不是 inline 执行。
+
+### 未验证
+- worker 镜像仍是 v1.4 时的构建（日志显示 `3 functions`，未含 v1.5 的
+  `push_report_task`）；重新 `docker compose build` 后才有 4 个函数与日报 cron。
+  本轮验证的是队列通道本身，不是最新镜像内容。
+
+## 5. 未验证项（如实）
 - PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
   生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；
