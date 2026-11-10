@@ -7,6 +7,7 @@ type Stats = { users: number; orders: number; jobs: number; payments_total: numb
 type UserRow = { id: string; tenant_id: string; phone: string; created_at: string | null };
 type OrderRow = { id: string; tenant_id: string; owner_id: string; title: string; education: string; status: string; price_cents: number; paid_at: string | null; created_at: string | null };
 type AuditRow = { id: string; admin_id: string; action: string; target: any; detail: any; created_at: string | null };
+type Report = { window_days: number; revenue_cents: number; orders_new: number; new_users: number; tokens_in: number; tokens_out: number };
 
 export default function Admin() {
   const [username, setUsername] = useState("admin");
@@ -16,18 +17,20 @@ export default function Admin() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [report, setReport] = useState<Report | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const [s, u, o, a] = await Promise.all([
+      const [s, u, o, a, rp] = await Promise.all([
         api<Stats>("/admin/stats", { admin: true }),
         api<UserRow[]>("/admin/users", { admin: true }),
         api<OrderRow[]>("/admin/orders", { admin: true }),
         api<AuditRow[]>("/admin/audit-log", { admin: true }),
+        api<Report>("/admin/reports/summary?days=7", { admin: true }),
       ]);
-      setStats(s); setUsers(u); setOrders(o); setAudit(a);
+      setStats(s); setUsers(u); setOrders(o); setAudit(a); setReport(rp);
     } catch (err: any) { setMsg(`加载失败：${err.message}`); }
   }, []);
 

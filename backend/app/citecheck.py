@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from .config import settings
+
 log = logging.getLogger(__name__)
 
 _TIMEOUT = 15.0
@@ -34,8 +36,8 @@ def _cache_put(key: str, value: dict) -> None:
     _CACHE[key] = (time.monotonic(), value)
 
 
-def _evidence(method: str, **kw) -> dict:
-    ev = {"method": method, "source": "crossref",
+def _evidence(method: str, source: str = "crossref", **kw) -> dict:
+    ev = {"method": method, "source": source,
           "checked_at": datetime.now(timezone.utc).isoformat()}
     ev.update(kw)
     return ev
@@ -82,6 +84,25 @@ async def _crossref_title(title: str) -> list[dict]:
         return out
 
 
+async def _s2_title(title: str) -> list[dict]:
+    """Semantic Scholar 标题检索（Crossref 无果时的第二源）。"""
+    headers = {}
+    if settings.semantic_scholar_api_key:
+        headers["x-api-key"] = settings.semantic_scholar_api_key
+    params = {"query": title, "limit": 3, "fields": "title,year,venue,externalIds"}
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r = await client.get("https://api.semanticscholar.org/graph/v1/paper/search",
+                             params=params, headers=headers)
+        r.raise_for_status()
+        out = []
+        for item in r.json().get("data", []):
+            out.append({"title": item.get("title"), "year": item.get("year"),
+                        "venue": item.get("venue"),
+                        "doi": (item.get("externalIds") or {}).get("DOI"),
+                        "source": "semantic_scholar"})
+        return out
+
+
 VERIFY_STATES = ("verified", "suspicious", "fake")
 _TITLE_MATCH = 0.85   # ≥0.85 → verified
 _TITLE_SUSPECT = 0.55  # 0.55~0.85 → suspicious；<0.55 → fake
@@ -119,36 +140,58 @@ async def verify_citation(title: str, doi: str | None = None,
             _cache_put(key, result)
             return result
 
-    # 2) 标题模糊匹配
+    # 2) 标题模糊匹配：Crossref → 未达 verified 再补 Semantic Scholar（多源交叉）
+    candidates: list[dict] = []
+    errors: list[str] = []
     try:
-        candidates = await _crossref_title(title)
+        candidates += [{**c, "source": "crossref"} for c in await _crossref_title(title)]
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"核查源不可用：crossref {exc}") from None
+        errors.append(f"crossref: {exc}")
+        log.warning("citecheck crossref failed: %s", exc)
 
-    best, best_sim = None, 0.0
-    for cand in candidates:
-        if not cand.get("title"):
-            continue
-        sim = _similarity(title, cand["title"])
-        if sim > best_sim:
-            best, best_sim = cand, sim
+    def _best(cands: list[dict]) -> tuple[dict | None, float]:
+        b, bs = None, 0.0
+        for cand in cands:
+            if not cand.get("title"):
+                continue
+            sim = _similarity(title, cand["title"])
+            if sim > bs:
+                b, bs = cand, sim
+        return b, bs
 
-    if best is None or best_sim < _TITLE_SUSPECT:
-        result = {"state": "fake", "similarity": round(best_sim, 3),
+    best, best_sim = _best(candidates)
+    if best_sim < _TITLE_MATCH:  # 首源未达 verified → 第二源补查
+        try:
+            candidates += await _s2_title(title)
+            best, best_sim = _best(candidates)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"semantic_scholar: {exc}")
+            log.warning("citecheck s2 failed: %s", exc)
+
+    if best is None:
+        if errors:
+            raise RuntimeError("核查源不可用：" + "; ".join(errors)) from None
+        result = {"state": "fake", "similarity": 0.0,
                   "evidence": _evidence("title-match", matched_title=None,
                                         candidates_checked=len(candidates))}
-    elif best_sim < _TITLE_MATCH:
-        result = {"state": "suspicious", "similarity": round(best_sim, 3),
-                  "evidence": _evidence("title-match", matched_title=best["title"],
-                                        matched_year=best.get("year"), venue=best.get("venue"),
-                                        matched_doi=best.get("doi"))}
     else:
-        year_ok = (year is None or best.get("year") == year)
-        state = "verified" if year_ok else "suspicious"
-        result = {"state": state, "similarity": round(best_sim, 3),
-                  "evidence": _evidence("title-match", matched_title=best["title"],
-                                        matched_year=best.get("year"), venue=best.get("venue"),
-                                        matched_doi=best.get("doi"),
-                                        year_mismatch=None if year_ok else year)}
+        src = best.get("source", "crossref")
+        if best_sim < _TITLE_SUSPECT:
+            result = {"state": "fake", "similarity": round(best_sim, 3),
+                      "evidence": _evidence("title-match", source=src, matched_title=None,
+                                            candidates_checked=len(candidates))}
+        elif best_sim < _TITLE_MATCH:
+            result = {"state": "suspicious", "similarity": round(best_sim, 3),
+                      "evidence": _evidence("title-match", source=src, matched_title=best["title"],
+                                            matched_year=best.get("year"), venue=best.get("venue"),
+                                            matched_doi=best.get("doi"))}
+        else:
+            year_ok = (year is None or best.get("year") == year)
+            state = "verified" if year_ok else "suspicious"
+            result = {"state": state, "similarity": round(best_sim, 3),
+                      "evidence": _evidence("title-match", source=src, matched_title=best["title"],
+                                            matched_year=best.get("year"), venue=best.get("venue"),
+                                            matched_doi=best.get("doi"),
+                                            year_mismatch=None if year_ok else year)}
     _cache_put(key, result)
     return result

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     wechat_app_id: str = ""            # 扫码登录（生产需填，空则只有 dev mock 可用）
     wechat_app_secret: str = ""
 
+    # 文献源凭据（可选）：OpenAlex 带 mailto 进「礼貌池」配额更稳；S2 key 提高限额
+    openalex_mailto: str = ""
+    openalex_api_key: str = ""
+    semantic_scholar_api_key: str = ""
+
     # 免费大纲次数（服务端强制，quota_ledger 台账）
     free_outline_limit: int = 3
 

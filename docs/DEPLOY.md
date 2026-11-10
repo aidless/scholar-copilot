@@ -152,3 +152,18 @@ arq app.tasks.worker.WorkerSettings
 - `POST /writing/orders/{id}/export?format=tex` → `.tex`（ctexart，需 xelatex 编译；仓库不内置 TeX 发行版）。
 - `GET /admin/exports/{orders|payments|commissions|audit}.csv` → UTF-8 BOM CSV（Excel 直开不乱码），上限 5000 行，
   每次导出写 `admin_audit_log`（action=`export.csv.<kind>`）。
+
+
+## v1.4 新增：文献三源、进度 WebSocket、运营日报
+
+| 变量 | 说明 |
+|---|---|
+| `SC_OPENALEX_MAILTO` | 填邮箱进入 OpenAlex 礼貌池（配额更稳），建议生产必填 |
+| `SC_OPENALEX_API_KEY` | OpenAlex 付费 key（可选） |
+| `SC_SEMANTIC_SCHOLAR_API_KEY` | Semantic Scholar key（匿名仅 ~1 req/s，易 429） |
+
+- 检索：`GET /references/search?q=` 源顺序 OpenAlex → Crossref → Semantic Scholar，结果按 DOI/标题去重。
+- 引用核查：Crossref 未达 verified 时自动补查 S2，`evidence.source` 标明实际来源。
+- 任务进度：`ws://HOST/jobs/{job_id}/ws?token=JWT`（每 1s 推状态，终态自动关闭；非属主 1008）。
+  反向代理需开启 WebSocket upgrade。
+- 运营日报：`GET /admin/reports/summary?days=7`（需 admin token）。
