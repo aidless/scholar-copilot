@@ -1,0 +1,211 @@
+"""SQLAlchemy 模型（v0.2 子集，列名与 deploy/init.sql 对齐）。
+
+纪律（THREAT-MODEL R1）：所有用户资源表带 tenant_id + owner_id 双列，
+查询必须过 app/tenancy.ownership_filter，禁止裸查。
+"""
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import Boolean, Column, DateTime, Index, Integer, JSON, String, Text
+
+from .db import Base
+
+
+def _uuid() -> str:
+    return uuid.uuid4().hex
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, default="primary", index=True)
+    phone = Column(String(20), unique=True, nullable=False, index=True)
+    password_hash = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class WritingOrder(Base):
+    """写作订单。status: draft→outlining→outline_done→writing→writing_done→exported"""
+
+    __tablename__ = "writing_orders"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    education = Column(String(16), nullable=False)  # 本科/硕士/博士
+    word_count = Column(Integer, nullable=False)
+    language = Column(String(8), nullable=False, default="zh")
+    writing_type = Column(String(32), nullable=False, default="thesis")
+    status = Column(String(32), nullable=False, default="draft")
+    price_cents = Column(Integer, nullable=False, default=0)  # 服务端算，前端传入无效
+    paid_at = Column(DateTime)  # v0.5：支付成功时间；正文生成/改写需已支付（对照原产品付费流）
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("ix_orders_tenant_owner", "tenant_id", "owner_id"),
+    )
+
+
+class OrderOutline(Base):
+    """大纲版本表：每次生成追加一行，version 递增。"""
+
+    __tablename__ = "order_outlines"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False)
+    order_id = Column(String(32), nullable=False, index=True)
+    version = Column(Integer, nullable=False)
+    content_md = Column(Text, nullable=False)
+    tree_json = Column(JSON, nullable=False)  # outline_parser 的树结构
+    created_at = Column(DateTime, default=_now)
+
+
+class OrderChapter(Base):
+    """章节骨架行：outline 成功时按 level1 节点创建。
+    status: pending→writing→done / failed
+    ai_level: A=AI生成未修改 B=AI初稿已修改 C=人工撰写（不可关，导出必带）
+    """
+
+    __tablename__ = "order_chapters"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False)
+    order_id = Column(String(32), nullable=False, index=True)
+    node_id = Column(String(32), nullable=False)  # ch1 / ch1_sec2 / ch1_sec2_sub3
+    idx = Column(Integer, nullable=False)  # 章序，导出按此排序
+    level = Column(Integer, nullable=False, default=1)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False, default="")
+    status = Column(String(16), nullable=False, default="pending")
+    content_md = Column(Text)
+    word_count = Column(Integer, nullable=False, default=0)
+    ai_level = Column(String(1), nullable=False, default="C")
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("ix_chapters_order_node", "order_id", "node_id", unique=True),
+    )
+
+
+class GenerationJob(Base):
+    """异步任务（大纲/章节）。v0.2 用 asyncio 内联执行，v0.5 换 arq。"""
+
+    __tablename__ = "generation_jobs"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False)
+    order_id = Column(String(32), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # outline / chapter
+    node_id = Column(String(32))  # kind=chapter 时目标节点
+    status = Column(String(16), nullable=False, default="queued")  # queued/running/done/failed
+    progress = Column(Integer, nullable=False, default=0)
+    result_json = Column(JSON)
+    error = Column(Text)
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    model = Column(String(64))
+    created_at = Column(DateTime, default=_now)
+    finished_at = Column(DateTime)
+
+
+class QuotaLedger(Base):
+    """append-only 配额台账，两类行：
+    - 消费/冲正（is_usage=True）：大纲生成 +1、失败退款 -1，净额=已用；
+    - 赠送/回收（is_usage=False）：管理员调整，净额=额外配额。
+    余额 = limit - Σ(is_usage) + Σ(非 is_usage)。
+    """
+
+    __tablename__ = "quota_ledger"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False)
+    user_id = Column(String(32), nullable=False, index=True)
+    kind = Column(String(32), nullable=False)  # outline
+    delta = Column(Integer, nullable=False)
+    is_usage = Column(Boolean, nullable=False, default=True)
+    reason = Column(String(255), nullable=False)
+    order_id = Column(String(32))
+    created_at = Column(DateTime, default=_now)
+
+    __table_args__ = (
+        Index("ix_quota_user_kind", "user_id", "kind"),
+    )
+
+
+class ReferenceItem(Base):
+    """订单文献引用。verify_state: unverified / verified / suspicious / fake（v0.4 核查填充）。"""
+
+    __tablename__ = "reference_items"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False)
+    owner_id = Column(String(32), nullable=False)
+    order_id = Column(String(32), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, default="journal")  # journal/book/web/custom
+    title = Column(String(500), nullable=False)
+    authors = Column(String(1000))
+    year = Column(Integer)
+    doi = Column(String(255))
+    url = Column(String(500))
+    cited_by = Column(Integer, default=0)
+    verify_state = Column(String(16), nullable=False, default="unverified")
+    verify_evidence = Column(JSON)
+    created_at = Column(DateTime, default=_now)
+
+
+class PaymentOrder(Base):
+    """支付单：订单付费流水。status: pending→paid / expired / refunded。
+    开源纪律：默认 mock 网关（确认端点模拟回调）；接真实微信/支付宝商户
+    需自部署配置 webhook，字段 provider_ref 预留三方流水号。
+    """
+
+    __tablename__ = "payment_orders"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    serial_no = Column(String(64), nullable=False, unique=True)  # 对外流水号
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    order_id = Column(String(32), nullable=False, index=True)
+    amount_cents = Column(Integer, nullable=False)  # 从订单服务端价取，禁止客户端传
+    pay_method = Column(String(16), nullable=False)  # wechat / alipay
+    status = Column(String(16), nullable=False, default="pending")
+    provider_ref = Column(String(255))
+    created_at = Column(DateTime, default=_now)
+    paid_at = Column(DateTime)
+
+
+class AdminUser(Base):
+    """管理端账号（修复原产品洞 P1-1：匿名 Vue 管理台 + 弱口令）。
+    初始管理员经 SC_ADMIN_INITIAL_PASSWORD 环境变量创建（线下交付语义）；
+    role: superadmin / tenant_admin / operator。
+    """
+
+    __tablename__ = "admin_users"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64))  # NULL = 平台级
+    login_name = Column(String(64), nullable=False, unique=True)
+    pass_hash = Column(String(128), nullable=False)
+    role = Column(String(16), nullable=False, default="operator")
+    status = Column(String(16), nullable=False, default="active")
+    created_at = Column(DateTime, default=_now)
+
+
+class AdminAuditLog(Base):
+    """管理动作全量留痕（原产品无日志）。"""
+
+    __tablename__ = "admin_audit_log"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    admin_id = Column(String(32), nullable=False, index=True)
+    action = Column(String(64), nullable=False)  # payment.confirm / quota.adjust / ...
+    target = Column(JSON)
+    detail = Column(JSON)
+    created_at = Column(DateTime, default=_now)

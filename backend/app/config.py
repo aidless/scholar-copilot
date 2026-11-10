@@ -1,0 +1,46 @@
+"""全局配置：一律从环境变量读取，绝不硬编码密钥（逆向教训：websiteInfo 泄密）。"""
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    # 数据库 / Redis
+    database_url: str = "postgresql+asyncpg://scholar:scholar@localhost:5432/scholar"
+    redis_url: str = "redis://localhost:6379/0"
+
+    # 鉴权：JWT 用非对称思路太重，MVP 用 HS256 + 每次部署随机默认（生产必须显式设置）
+    jwt_secret: str = "change-me-in-production"
+    jwt_expire_days: int = 7
+
+    # 短信签名密钥（HMAC，5 分钟有效；替代静态盐 sha256）
+    sms_hmac_key: str = "change-me-sms"
+    # 开发模式：跳过真实短信，验证码固定 000000（生产必须 false）
+    sms_dev_mode: bool = True
+
+    # 免费大纲次数（服务端强制，quota_ledger 台账）
+    free_outline_limit: int = 3
+
+    # 启动时自动建表（sqlite 开发/测试便利；生产用 deploy/init.sql，置 false）
+    db_auto_create: bool = True
+
+    # LLM Provider（OpenAI 兼容统一入口；本地 vLLM/Ollama 也是这个协议）
+    llm_provider: str = "openai_compat"
+    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "deepseek-chat"
+
+    # 多租户：主域。子域/自定义域通过 tenants 表解析
+    primary_domain: str = "localhost:3000"
+
+    # v0.5 支付：mock=确认端点模拟回调（默认，自部署演示）；manual=管理员人工确认收款；
+    # 真实微信/支付宝商户回调 v1.0 接 webhook（provider_ref 字段已预留）
+    payment_mode: str = "mock"
+
+    # v0.5 管理端：初始管理员（线下交付语义——密码从环境注入，非硬编码；
+    # 空则不创建。生产：openssl rand -hex 12 生成后写入环境变量）
+    admin_initial_login: str = "admin"
+    admin_initial_password: str = ""
+
+    model_config = {"env_file": ".env", "env_prefix": "SC_"}
+
+
+settings = Settings()

@@ -1,0 +1,63 @@
+"""应用工厂。健康检查先行，业务路由逐版本点亮。"""
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from . import tenancy
+from .routers import (admin, auth, billing, formatting, jobs, payments,
+                      references, review, tools, writing)
+
+VERSION = "0.5.0"
+OPENAPI_PATH = "/docs"
+
+
+def create_app() -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        from .config import settings
+
+        if settings.db_auto_create:
+            from .db import _engine_and_session, Base
+            import app.models  # noqa: F401——注册 metadata
+
+            engine, _ = _engine_and_session()
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            # 初始管理员（线下交付语义：密码仅从环境注入；空则不创建）
+            if settings.admin_initial_password:
+                from .models import AdminUser
+                from .security import hash_password
+                from sqlalchemy import select, func
+                async with _engine_and_session()[1]() as db:
+                    existing = (await db.execute(
+                        select(func.count()).select_from(AdminUser))).scalar()
+                    if not existing:
+                        db.add(AdminUser(
+                            tenant_id=None, login_name=settings.admin_initial_login,
+                            pass_hash=hash_password(settings.admin_initial_password),
+                            role="superadmin"))
+                        await db.commit()
+        yield
+
+    app = FastAPI(title="Scholar Copilot", version=VERSION,
+                  description="开源学术写作 Copilot（多租户自部署）",
+                  lifespan=lifespan)
+    app.include_router(auth.router)
+    app.include_router(writing.router)
+    app.include_router(references.router)
+    app.include_router(review.router)
+    app.include_router(billing.router)
+    app.include_router(admin.router)
+    app.include_router(jobs.router)
+    app.include_router(tools.router)
+    app.include_router(formatting.router)
+    app.include_router(payments.router)
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok", "version": VERSION}
+
+    return app
+
+
+app = create_app()
