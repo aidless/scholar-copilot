@@ -96,6 +96,8 @@ def test_citecheck_all_sources_down_raises(monkeypatch):
 
     monkeypatch.setattr(citecheck, "_crossref_title", boom)
     monkeypatch.setattr(citecheck, "_s2_title", boom)
+    # v1.6 起 PubMed 是第三源：它也得挂，才叫「全部源不可用」
+    monkeypatch.setattr(citecheck, "_pubmed_title", boom)
     monkeypatch.setattr(citecheck, "_CACHE", {})
 
     import asyncio
@@ -237,3 +239,118 @@ def test_pubmed_disabled_is_not_in_chain(monkeypatch):
     with pytest.raises(RuntimeError):
         asyncio.run(litsearch.search_literature("q", limit=3))
     assert called["pubmed"] is False
+
+
+# ---------------------------------------------------------------- citecheck 第三源 PubMed（v1.6）
+def test_citecheck_falls_back_to_pubmed(monkeypatch):
+    """Crossref 查不到、S2 挂了 → PubMed 补上，且证据里标 source=pubmed。"""
+    from app import citecheck
+    from app.config import settings
+
+    async def cr_empty(title): return []
+
+    async def s2_boom(title): raise RuntimeError("429")
+
+    async def pubmed_hit(title):
+        return [{"title": "Effect of Metformin in Type 2 Diabetes",
+                 "year": 2018, "venue": "Diabetes Care", "doi": "10.2337/dc18", "source": "pubmed"}]
+
+    monkeypatch.setattr(citecheck, "_crossref_title", cr_empty)
+    monkeypatch.setattr(citecheck, "_s2_title", s2_boom)
+    monkeypatch.setattr(citecheck, "_pubmed_title", pubmed_hit)
+    monkeypatch.setattr(settings, "pubmed_enabled", True)
+    monkeypatch.setattr(citecheck, "_CACHE", {})
+
+    import asyncio
+    out = asyncio.run(citecheck.verify_citation("Effect of Metformin in Type 2 Diabetes"))
+    assert out["state"] == "verified"
+    assert out["evidence"]["source"] == "pubmed"
+    assert out["evidence"]["matched_doi"] == "10.2337/dc18"
+
+
+def test_citecheck_stops_when_first_source_verified(monkeypatch):
+    """Crossref 已达 verified 阈值就不该再打 S2/PubMed（省配额、省时间）。"""
+    from app import citecheck
+
+    called = {"s2": 0, "pubmed": 0}
+
+    async def cr_hit(title):
+        return [{"title": title, "year": 2020, "venue": "V", "doi": "10.1/a", "source": "crossref"}]
+
+    async def s2(title):
+        called["s2"] += 1
+        return []
+
+    async def pubmed(title):
+        called["pubmed"] += 1
+        return []
+
+    monkeypatch.setattr(citecheck, "_crossref_title", cr_hit)
+    monkeypatch.setattr(citecheck, "_s2_title", s2)
+    monkeypatch.setattr(citecheck, "_pubmed_title", pubmed)
+    monkeypatch.setattr(citecheck, "_CACHE", {})
+
+    import asyncio
+    out = asyncio.run(citecheck.verify_citation("Exact Match Title", year=2020))
+    assert out["state"] == "verified"
+    assert called == {"s2": 0, "pubmed": 0}
+
+
+def test_citecheck_skips_pubmed_when_disabled(monkeypatch):
+    from app import citecheck
+    from app.config import settings
+
+    called = {"pubmed": 0}
+
+    async def cr_empty(title): return []
+    async def s2_empty(title): return []
+
+    async def pubmed(title):
+        called["pubmed"] += 1
+        return []
+
+    monkeypatch.setattr(citecheck, "_crossref_title", cr_empty)
+    monkeypatch.setattr(citecheck, "_s2_title", s2_empty)
+    monkeypatch.setattr(citecheck, "_pubmed_title", pubmed)
+    monkeypatch.setattr(settings, "pubmed_enabled", False)
+    monkeypatch.setattr(citecheck, "_CACHE", {})
+
+    import asyncio
+    out = asyncio.run(citecheck.verify_citation("No Such Paper Anywhere"))
+    assert out["state"] == "fake"
+    assert called["pubmed"] == 0
+
+
+def test_pubmed_title_parses_esummary(monkeypatch):
+    """citecheck 侧的 esummary 解析：DOI 从 articleids 挑、年份取 pubdate 前四位。"""
+    from app import citecheck
+
+    class FakeResp:
+        def __init__(self, payload): self._p = payload
+        def raise_for_status(self): pass
+        def json(self): return self._p
+
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, params=None, headers=None):
+            calls.append(url)
+            if "esearch" in url:
+                return FakeResp({"esearchresult": {"idlist": ["777"]}})
+            return FakeResp({"result": {"777": {
+                "uid": "777", "title": "Metformin Trial.",
+                "pubdate": "2018 Jun", "fulljournalname": "Diabetes Care",
+                "articleids": [{"idtype": "pubmed", "value": "777"},
+                               {"idtype": "doi", "value": "10.2337/dc18"}]}}})
+
+    monkeypatch.setattr(citecheck.httpx, "AsyncClient", FakeClient)
+    import asyncio
+    out = asyncio.run(citecheck._pubmed_title("metformin"))
+    assert len(calls) == 2                       # esearch + esummary
+    assert out[0]["doi"] == "10.2337/dc18"
+    assert out[0]["year"] == 2018
+    assert out[0]["title"] == "Metformin Trial"  # 去句末点
+    assert out[0]["source"] == "pubmed"

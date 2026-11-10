@@ -103,6 +103,48 @@ async def _s2_title(title: str) -> list[dict]:
         return out
 
 
+async def _pubmed_title(title: str) -> list[dict]:
+    """PubMed 标题检索（第三源）。医学/临床文献常只在 PubMed 有 DOI。
+
+    走和 litsearch 相同的两步：esearch 拿 PMID → esummary 拿元数据。
+    """
+    common = {"db": "pubmed", "retmode": "json"}
+    if settings.pubmed_api_key:
+        common["api_key"] = settings.pubmed_api_key
+    if settings.pubmed_email:
+        common["email"] = settings.pubmed_email
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        r1 = await client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                              params={**common, "term": title, "retmax": 3})
+        r1.raise_for_status()
+        ids = (r1.json().get("esearchresult") or {}).get("idlist") or []
+        if not ids:
+            return []
+        r2 = await client.get("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi",
+                              params={**common, "id": ",".join(ids)})
+        r2.raise_for_status()
+        result = r2.json().get("result") or {}
+    out = []
+    for uid in ids:
+        item = result.get(uid)
+        if not item or not item.get("title"):
+            continue
+        doi = ""
+        for aid in item.get("articleids") or []:
+            if aid.get("idtype") == "doi" and aid.get("value"):
+                doi = aid["value"]
+                break
+        pubdate = item.get("pubdate") or ""
+        out.append({
+            "title": item["title"].rstrip("."),
+            "year": int(pubdate[:4]) if pubdate[:4].isdigit() else None,
+            "venue": item.get("fulljournalname") or item.get("source"),
+            "doi": doi,
+            "source": "pubmed",
+        })
+    return out
+
+
 VERIFY_STATES = ("verified", "suspicious", "fake")
 _TITLE_MATCH = 0.85   # ≥0.85 → verified
 _TITLE_SUSPECT = 0.55  # 0.55~0.85 → suspicious；<0.55 → fake
@@ -113,7 +155,8 @@ async def verify_citation(title: str, doi: str | None = None,
     """单条引用核查。返回 {"state": ..., "similarity": ..., "evidence": {...}}。
 
     判定顺序：有 DOI 先查 DOI（命中即 verified，可附年份不一致降级 suspicious）；
-    无 DOI 或 DOI 查无 → 标题模糊匹配。
+    无 DOI 或 DOI 查无 → 标题模糊匹配，Crossref → Semantic Scholar → PubMed 逐源补查，
+    任一本源达到 verified 阈值即停（多源是为了「这个查不到还有别的」，不是混排打分）。
     """
     key = f"{_norm(title)}|{doi or ''}|{year or ''}"
     cached = _cache_get(key)
@@ -160,13 +203,19 @@ async def verify_citation(title: str, doi: str | None = None,
         return b, bs
 
     best, best_sim = _best(candidates)
-    if best_sim < _TITLE_MATCH:  # 首源未达 verified → 第二源补查
+    # 首源未达 verified → 依次补查后续源（S2 → PubMed），命中即停
+    extra_sources = [("semantic_scholar", _s2_title)]
+    if settings.pubmed_enabled:
+        extra_sources.append(("pubmed", _pubmed_title))
+    for src_name, fn in extra_sources:
+        if best_sim >= _TITLE_MATCH:
+            break
         try:
-            candidates += await _s2_title(title)
+            candidates += await fn(title)
             best, best_sim = _best(candidates)
         except Exception as exc:  # noqa: BLE001
-            errors.append(f"semantic_scholar: {exc}")
-            log.warning("citecheck s2 failed: %s", exc)
+            errors.append(f"{src_name}: {exc}")
+            log.warning("citecheck %s failed: %s", src_name, exc)
 
     if best is None:
         if errors:

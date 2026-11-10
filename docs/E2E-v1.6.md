@@ -1,6 +1,6 @@
 # E2E 证据：v1.6 检索四源 + 任务进度 WebSocket
 
-日期：2026-11-10　版本：1.6.0　测试：**74 passed**
+日期：2026-11-10　版本：1.6.0　测试：**78 passed**
 
 ## 1. 文献源扩到四源（新增 PubMed）
 
@@ -72,7 +72,39 @@ frame: done 100 {'version': 1, 'chapters': 5}
 前端构建：8 路由通过，`/workbench` 4.03 kB（接入 hook 后 +1.7 kB），
 First Load JS 107 kB。
 
+
+## 2b. 引用核查接 PubMed 交叉（第三源）
+
+### 改动（`app/citecheck.py`）
+- 新增 `_pubmed_title`：与 litsearch 同款两步（esearch → esummary），DOI 从 `articleids` 挑。
+- 标题匹配的补查链从「Crossref → S2」扩到「Crossref → S2 → PubMed」，
+  且**任一本源达到 verified 阈值（0.85）就停**——多源是为了「这个查不到还有别的」，
+  不是为了把三个源都打一遍（每多打一源都是延迟与配额）。
+- `SC_PUBMED_ENABLED=false` 时 PubMed 不进补查链。
+
+### 实测（真网络）
+```
+_pubmed_title("Effect of metformin on type 2 diabetes") → 3 条
+ - Tissue-resolved transcriptomic and proteomic profiling … | 2026 | 10.3389/fendo.2026.1954533
+ - Clinical pharmacology of antidiabetic drugs: an update   | 2026 | 10.1007/s00228-026-04219-z
+verify_citation("Effect of metformin on type 2 diabetes") → suspicious 0.703 crossref
+verify_citation("这是一个完全编造的中文标题量子计算与诗意") → fake 0.2 crossref
+```
+（S2 侧本轮命中匿名 429，正好演示了降级：日志记 warning，链路继续走到下一源。）
+
+### 测试（新增 4 项）
+| 用例 | 断言 |
+|---|---|
+| Crossref 空 + S2 挂 → PubMed 命中 | state=verified，`evidence.source == "pubmed"`，matched_doi 正确 |
+| 首源已 verified | S2 与 PubMed 调用计数均为 0（不浪费配额） |
+| 关闭 PubMed | 全空时 state=fake 且 PubMed 未被调用 |
+| esummary 解析 | 两次请求（esearch+esummary）、DOI 取 doi 而非 pubmed id、年份 2018、标题去句末点 |
+
+RED 反证：删掉 `if best_sim >= _TITLE_MATCH: break` → 「首源已 verified 不再补查」变红。
+
 ## 3. 未验证项（如实）
+- PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
+  生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；
   v1.4 已在真模型 + arq 链路上验过 queued→done 两帧与 result 载荷。
 - WS 降级路径靠代码逻辑与 `transport` 状态覆盖，未在真实反代（nginx 未配 Upgrade）环境实测。
