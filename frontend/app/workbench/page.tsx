@@ -2,6 +2,7 @@
 // 写作台：下单 → 免费大纲 → 逐章生成 → 在线改稿 → 支付 → 导出 DOCX
 import { useCallback, useEffect, useState } from "react";
 import { api, tokenStore } from "../../lib/api";
+import { useJobProgress } from "../../lib/jobProgress";
 
 type Order = {
   id: string; title: string; education: string; word_count: number;
@@ -28,6 +29,9 @@ export default function Workbench() {
   const [words, setWords] = useState(12000);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 正在跑的生成任务：提交后立刻拿到 job_id，进度由 WebSocket 推（不可用则降级轮询）
+  const [activeJob, setActiveJob] = useState<string | null>(null);
+  const { state: jobState, transport } = useJobProgress(activeJob);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -43,6 +47,21 @@ export default function Workbench() {
 
   useEffect(() => { if (!tokenStore.get()) { setMsg("请先在首页登录"); return; } loadOrders(); }, [loadOrders]);
 
+  // 任务到终态后刷新数据（进度条消失、章节/状态更新）
+  useEffect(() => {
+    if (!jobState || !cur) return;
+    if (jobState.status === "done") {
+      setMsg(`${jobState.kind} 完成（${jobState.result ? JSON.stringify(jobState.result) : "ok"}）`);
+      setActiveJob(null);
+      loadChapters(cur.id);
+      loadOrders();
+      api<Order>(`/writing/orders/${cur.id}`).then(setCur).catch(() => {});
+    } else if (jobState.status === "failed") {
+      setMsg(`${jobState.kind} 失败：${jobState.error || "未知原因"}`);
+      setActiveJob(null);
+    }
+  }, [jobState, cur, loadChapters, loadOrders]);
+
   async function createOrder(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true); setMsg(null);
@@ -57,22 +76,21 @@ export default function Workbench() {
 
   async function genOutline() {
     if (!cur) return;
-    setBusy(true); setMsg("大纲生成中（免费额度，真模型约 30~60 秒）…");
+    setBusy(true); setMsg("已提交大纲生成（免费额度，真模型约 30~60 秒）…");
     try {
-      await api(`/writing/orders/${cur.id}/outline?wait=true`, { method: "POST", body: { feedback: null } });
-      await loadChapters(cur.id);
-      const fresh = await api<Order>(`/writing/orders/${cur.id}`);
-      setCur(fresh); setMsg("大纲完成，已生成章节骨架");
-      await loadOrders();
-    } catch (err: any) { setMsg(`大纲失败：${err.message}`); } finally { setBusy(false); }
+      const r = await api<{ job_id: string }>(`/writing/orders/${cur.id}/outline`, {
+        method: "POST", body: { feedback: null },
+      });
+      setActiveJob(r.job_id);   // 进度走 WebSocket，不再同步阻塞
+    } catch (err: any) { setMsg(`大纲提交失败：${err.message}`); } finally { setBusy(false); }
   }
 
   async function genChapter(nodeId: string) {
     if (!cur) return;
-    setBusy(true); setMsg(`章节 ${nodeId} 生成中…（需先支付）`);
+    setBusy(true); setMsg(`已提交章节 ${nodeId} 生成（需先支付）…`);
     try {
-      await api(`/writing/orders/${cur.id}/chapters/${nodeId}?wait=true`, { method: "POST" });
-      await loadChapters(cur.id); setMsg(`章节 ${nodeId} 完成`);
+      const r = await api<{ job_id: string }>(`/writing/orders/${cur.id}/chapters/${nodeId}`, { method: "POST" });
+      setActiveJob(r.job_id);
     } catch (err: any) { setMsg(`生成失败：${err.message}`); } finally { setBusy(false); }
   }
 
@@ -87,12 +105,12 @@ export default function Workbench() {
 
   async function rewriteChapter(ch: Chapter) {
     if (!cur) return;
-    setBusy(true); setMsg(`降重改写 ${ch.node_id} 中…`);
+    setBusy(true); setMsg(`已提交 ${ch.node_id} 降重改写…`);
     try {
-      await api(`/writing/orders/${cur.id}/chapters/${ch.node_id}/rewrite?wait=true`, {
+      const r = await api<{ job_id: string }>(`/writing/orders/${cur.id}/chapters/${ch.node_id}/rewrite`, {
         method: "POST", body: { instruction: "语言更学术、降低重复表达，保留全部事实与引用标记" },
       });
-      await loadChapters(cur.id); setMsg(`${ch.node_id} 改写完成`);
+      setActiveJob(r.job_id);
     } catch (err: any) { setMsg(`改写失败：${err.message}`); } finally { setBusy(false); }
   }
 
@@ -172,6 +190,18 @@ export default function Workbench() {
                 <button disabled={busy} onClick={pay} className="border rounded px-3 py-1 disabled:opacity-50">支付（mock）</button>
                 <button disabled={busy} onClick={exportDocx} className="border rounded px-3 py-1 disabled:opacity-50">导出 DOCX</button>
               </div>
+
+              {activeJob && (
+                <div className="border rounded p-3 space-y-1">
+                  <div className="flex justify-between text-xs text-neutral-600">
+                    <span>{jobState ? `${jobState.kind} · ${jobState.status}` : "连接任务…"}</span>
+                    <span>{jobState?.progress ?? 0}% · {transport === "ws" ? "实时推送" : transport === "poll" ? "轮询降级" : "连接中"}</span>
+                  </div>
+                  <div className="h-1.5 bg-neutral-100 rounded overflow-hidden">
+                    <div className="h-full bg-neutral-900 transition-all" style={{ width: `${jobState?.progress ?? 0}%` }} />
+                  </div>
+                </div>
+              )}
 
               {chapters.map((ch) => (
                 <details key={ch.id} className="border rounded p-3">
