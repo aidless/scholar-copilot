@@ -30,6 +30,12 @@ jobs:
         env:
           SC_DATABASE_URL: sqlite+aiosqlite:///./ci-alembic.db
         run: alembic upgrade head
+      - name: OpenAPI 契约与代码一致
+        env:
+          SC_DATABASE_URL: sqlite+aiosqlite:///./ci-openapi.db
+          SC_JWT_SECRET: ci-secret
+          SC_DB_AUTO_CREATE: "true"
+        run: python -m scripts.export_openapi --check
       - name: Tests
         run: python -m pytest tests/ -q
 

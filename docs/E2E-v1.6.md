@@ -1,6 +1,6 @@
 # E2E 证据：v1.6 检索四源 + 任务进度 WebSocket
 
-日期：2026-11-10　版本：1.6.0　测试：**78 passed**
+日期：2026-11-10　版本：1.6.0　测试：**83 passed**
 
 ## 1. 文献源扩到四源（新增 PubMed）
 
@@ -151,7 +151,50 @@ docker exec sce2e-redis-1 redis-cli KEYS 'arq:*'
   `push_report_task`）；重新 `docker compose build` 后才有 4 个函数与日报 cron。
   本轮验证的是队列通道本身，不是最新镜像内容。
 
-## 5. 未验证项（如实）
+
+## 5. API 契约改为代码导出 + 一致性门
+
+### 问题
+`openapi.yaml` 是 v0.1 手写骨架（18 个端点，带 `x-origin` 与原产品对照），
+而代码已长到 **53 个端点**。文档与实现静默脱节——外部按契约对接必然踩空，
+而且没人会发现（没有任何检查）。
+
+### 改法
+- 新增 `backend/scripts/export_openapi.py`：从 `create_app().openapi()` 导出，
+  补 `info`（版本跟 `app.main.VERSION`）、`servers`、`securitySchemes`（Bearer JWT），
+  并按匿名端点白名单（`/health`、`/auth/login|register|sms|wechat`、`/tenant/branding`、
+  `/billing/quote`、`/formatting/profiles`、`/references/search|verify`、`/admin/login`、
+  `/distributor/login`）给其余端点打 `security`。
+  > 为什么要手工补 `securitySchemes`：路由用 `Header(default="")` 依赖解析 Bearer，
+  > 而不是 FastAPI 的 `Security()`，所以框架不会自动生成 securitySchemes——
+  > 不补的话 SDK 生成器不会带 `Authorization` 头。
+- 支持 `--check`（只校验不写）与 `--out`（写别处，供测试比对）。
+- `backend/tests/test_openapi_sync.py` 5 项：文件存在 / 路径集合与代码一致 /
+  版本与 `VERSION` 一致 / 有 bearer securityScheme / **重跑导出脚本结果与仓库文件逐字段相同**。
+  最后一条比「路径集合相同」更严：能抓出描述文字、字段定义被改却没提交。
+- CI 加独立步骤 `python -m scripts.export_openapi --check`（在 pytest 之前挡）。
+
+### 实测
+```
+python -m scripts.export_openapi
+→ 已写入 openapi.yaml（53 个路径，24 个 schema）
+python -m scripts.export_openapi --check
+→ 已是最新（53 个路径） rc=0
+pytest tests/test_openapi_sync.py -q  → 5 passed
+```
+
+### RED 反证（两条都验过）
+| 注入 | 结果 |
+|---|---|
+| 从文档里删掉 `/tools/ppt` | `test_openapi_yaml_matches_code` 红 |
+| 把 `info.version` 改成 `0.0.9` | `test_openapi_yaml_version_matches_app` 红 |
+恢复后 5 passed。
+
+### 取舍说明
+旧文件的 `x-origin`（与原产品端点对照）在代码导出的契约里没有——那份对照的价值
+已经沉在 README 的「与逆向原产品的差异」表和 `blx-recon` 报告里，契约文件只留事实。
+
+## 6. 未验证项（如实）
 - PubMed 在 citecheck 侧的**批量**核查（50 条）未压测；NCBI 匿名 3 req/s 下批量会触发限流，
   生产应配 `SC_PUBMED_API_KEY`（10 req/s）——已写进 .env.example 注释。
 - 真实模型下的中间进度帧（`running` 阶段 progress 递增）未在本轮重跑；

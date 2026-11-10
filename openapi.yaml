@@ -1,103 +1,2391 @@
-# Scholar Copilot API 契约 v0.1（骨架）
-
-> 与原产品（blsxueshu 逆向还原的 90+ 端点）的对应关系标注在各端点 `x-origin`。
-> 设计差异：**标准 REST + HTTP 状态码**，不用 {code:9999} 黑盒业务码；错误体统一 `{detail}`。
-
+openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 0.1.0
-  description: |
-    鉴权：Bearer JWT。所有用户资源查询强制 tenant+owner 过滤（服务端实现，见 app/tenancy.py）。
-    计费与配额全部服务端判定；配额不足返回 402，属主不符返回 404（不泄露存在性）。
+  version: 1.6.0
+  description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
+
+    鉴权：Bearer JWT（`Authorization: Bearer <token>`）。管理端与分销端各自独立 token。
+
+    资源隔离：所有用户资源查询强制 tenant+owner 过滤；属主不符统一 404（不泄露存在性）。
+
+    计费配额：价格与配额全部服务端判定；配额不足 402；未支付生成正文 402。
+
+    限流：登录 20/min、LLM 类 10/min、检索 30/min，超限 429 + `Retry-After`。
+
+    任务：生成类端点默认 202 返回 `{job_id,status}`，用 `GET /jobs/{id}` 轮询或
+
+    `WS /jobs/{id}/ws?token=` 订阅进度。
+
+    '
 paths:
-  /health:
+  /auth/register:
+    post:
+      tags:
+      - auth
+      summary: Register
+      operationId: register_auth_register_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/login:
+    post:
+      tags:
+      - auth
+      summary: Login
+      operationId: login_auth_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenOut'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/me:
     get:
-      summary: 健康检查
-      responses: { "200": { description: ok } }
-
-  /auth/register: { post: { summary: 注册（短信验证码），返回 JWT, x-origin: websiteUser/addUserByPhone, responses: { "200": { description: TokenOut }, "501": { description: 骨架未实现 } } } }
-  /auth/login: { post: { summary: 手机号+密码登录, x-origin: websiteUser/login, responses: { "200": { description: TokenOut }, "401": { description: 凭证错误 } } } }
-  /auth/me: { get: { summary: 当前用户（含配额余额）, responses: { "200": { description: UserInfo } } } }
-
-  /billing/quote:
-    get:
-      summary: 价格试算（公式透明，前后端同公式）
+      tags:
+      - auth
+      summary: Me
+      operationId: me_auth_me_get
       parameters:
-        - { name: education, in: query, required: true, schema: { type: string, enum: [本科, 硕士, 博士] } }
-        - { name: word_count, in: query, required: true, schema: { type: integer } }
-      responses: { "200": { description: "{price_cents, currency}" } }
-      x-origin: aiWriting/saveOrder 的服务端算价部分
-
-  /billing/quota:
-    get: { summary: 当前用户各品类配额余额（quota_ledger SUM）, x-origin: aiWriting/freeOutlineNumber }
-
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /auth/sms/send:
+    post:
+      tags:
+      - auth
+      summary: Sms Send
+      description: 发送验证码。无论手机号是否已注册都返回同一响应（不给注册状态 oracle）。
+      operationId: sms_send_auth_sms_send_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SmsSendIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/wechat/qrcode:
+    post:
+      tags:
+      - auth
+      summary: Wechat Qrcode
+      operationId: wechat_qrcode_auth_wechat_qrcode_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /auth/wechat/mock-approve:
+    post:
+      tags:
+      - auth
+      summary: Wechat Mock Approve
+      description: dev-only：模拟扫码确认（生产环境一律 403）。
+      operationId: wechat_mock_approve_auth_wechat_mock_approve_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              type: object
+              title: Body
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /auth/wechat/poll:
+    get:
+      tags:
+      - auth
+      summary: Wechat Poll
+      operationId: wechat_poll_auth_wechat_poll_get
+      parameters:
+      - name: scene
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Scene
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /writing/orders:
     post:
-      summary: 创建写作订单（价格服务端算，前端传价格字段无效）
-      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/OrderIn" } } } }
-      responses: { "200": { description: OrderOut }, "402": { description: 配额/余额不足 } }
-      x-origin: aiWriting/saveOrder
+      tags:
+      - writing
+      summary: Create Order
+      operationId: create_order_writing_orders_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
     get:
-      summary: 我的订单列表（强制属主过滤）
-      responses: { "200": { description: "OrderOut[]" } }
-      x-origin: aiWriting/query
-
+      tags:
+      - writing
+      summary: List Orders
+      operationId: list_orders_writing_orders_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders/{order_id}:
     get:
-      summary: 订单详情
-      parameters: [{ name: order_id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: OrderOut }, "404": { description: 不存在或不属当前用户（统一 404，防枚举） } }
-      x-origin: aiWriting/orderInfo —— 原 IDOR 漏洞点，此处 404 即修复
-    delete: { summary: 删除草稿单, x-origin: aiWriting/delOrder }
-
+      tags:
+      - writing
+      summary: Get Order
+      operationId: get_order_writing_orders__order_id__get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    delete:
+      tags:
+      - writing
+      summary: Delete Order
+      operationId: delete_order_writing_orders__order_id__delete
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders/{order_id}/outline:
     post:
-      summary: 生成大纲（异步，返回 job_id；免费配额服务端扣）
-      responses: { "202": { description: "{job_id}" }, "402": { description: 免费次数用尽 } }
-      x-origin: aiWriting/outline —— 原产品免费 3 次后 code:1008，此处 402
-
-  /writing/orders/{order_id}/chapters/{idx}:
-    post: { summary: 生成/改写单章（异步）, responses: { "202": { description: "{job_id}" } } }
-
+      tags:
+      - writing
+      summary: Gen Outline
+      operationId: gen_outline_writing_orders__order_id__outline_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: wait
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Wait
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/OutlineIn'
+              - type: 'null'
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - writing
+      summary: Get Outline
+      operationId: get_outline_writing_orders__order_id__outline_get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/chapters:
+    get:
+      tags:
+      - writing
+      summary: List Chapters
+      operationId: list_chapters_writing_orders__order_id__chapters_get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/chapters/{node_id}:
+    post:
+      tags:
+      - writing
+      summary: Gen Chapter
+      operationId: gen_chapter_writing_orders__order_id__chapters__node_id__post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Node Id
+      - name: wait
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Wait
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    put:
+      tags:
+      - writing
+      summary: Edit Chapter
+      operationId: edit_chapter_writing_orders__order_id__chapters__node_id__put
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Node Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapterEditIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/chapters/{node_id}/rewrite:
+    post:
+      tags:
+      - writing
+      summary: Rewrite Chapter
+      operationId: rewrite_chapter_writing_orders__order_id__chapters__node_id__rewrite_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Node Id
+      - name: wait
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Wait
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              anyOf:
+              - $ref: '#/components/schemas/app__routers__writing__RewriteIn'
+              - type: 'null'
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders/{order_id}/export:
-    post: { summary: 导出 DOCX（必带 AI 参与度标记页）, responses: { "200": { description: 文件流 } } }
-
-  /jobs/{job_id}:
-    get: { summary: 任务状态轮询（queued/running/done/failed + progress）, responses: { "200": { description: JobOut } } }
-
+    post:
+      tags:
+      - writing
+      summary: Export Order
+      operationId: export_order_writing_orders__order_id__export_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: profile
+        in: query
+        required: false
+        schema:
+          type: string
+          default: default
+          title: Profile
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+          pattern: ^(docx|pdf|tex)$
+          default: docx
+          title: Format
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /references/search:
-    get: { summary: 文献检索（paperKB + OpenAlex/Crossref 交叉）, responses: { "200": { description: "ReferenceOut[]，每条带 verify_state" } } }
+    get:
+      tags:
+      - references
+      summary: Search
+      operationId: search_references_search_get
+      parameters:
+      - name: q
+        in: query
+        required: true
+        schema:
+          type: string
+          minLength: 2
+          maxLength: 200
+          title: Q
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 8
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /references/orders/{order_id}:
+    post:
+      tags:
+      - references
+      summary: Attach To Order
+      operationId: attach_to_order_references_orders__order_id__post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefsIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - references
+      summary: List Order Refs
+      operationId: list_order_refs_references_orders__order_id__get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /references/verify:
-    post: { summary: 单条引用真实性核查, responses: { "200": { description: "{verify_state, evidence}" } } }
-
+    post:
+      tags:
+      - references
+      summary: Verify Items
+      description: 临时引用核查（不落库）：逐条返回三态 + 证据。
+      operationId: verify_items_references_verify_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /references/orders/{order_id}/verify:
+    post:
+      tags:
+      - references
+      summary: Verify Order Refs
+      description: 批量核查订单文献：更新每行 verify_state / verify_evidence，返回汇总。
+      operationId: verify_order_refs_references_orders__order_id__verify_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /review/orders/{order_id}/audit:
-    post: { summary: 全文核查（引用/数字/统计），产出报告, responses: { "202": { description: "{job_id}" } } }
-
-  /payments:
-    post: { summary: 创建支付单（微信 Native / 支付宝）, x-origin: pay/payment, responses: { "200": { description: "{serial_no, qr_url}" } } }
+    post:
+      tags:
+      - review
+      summary: Audit
+      operationId: audit_review_orders__order_id__audit_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tenant/branding:
+    get:
+      tags:
+      - tenant
+      summary: Branding
+      description: 按 Host 解析租户并返回品牌信息（公开接口，字段白名单）。
+      operationId: branding_tenant_branding_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /distributor/login:
+    post:
+      tags:
+      - distributor
+      summary: Dist Login
+      operationId: dist_login_distributor_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DistLoginIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /distributor/me:
+    get:
+      tags:
+      - distributor
+      summary: Dist Me
+      operationId: dist_me_distributor_me_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /distributor/commissions:
+    get:
+      tags:
+      - distributor
+      summary: Dist Commissions
+      operationId: dist_commissions_distributor_commissions_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /distributor/transfers:
+    post:
+      tags:
+      - distributor
+      summary: Request Transfer
+      operationId: request_transfer_distributor_transfers_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - distributor
+      summary: List Transfers
+      operationId: list_transfers_distributor_transfers_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /billing/quote:
+    get:
+      tags:
+      - billing
+      summary: Quote
+      description: 价格透明：同一公式前端后端各算一遍，不一致说明有人在中间动手脚。
+      operationId: quote_billing_quote_get
+      parameters:
+      - name: education
+        in: query
+        required: true
+        schema:
+          type: string
+          title: Education
+      - name: word_count
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Word Count
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /billing/quota:
+    get:
+      tags:
+      - billing
+      summary: Quota
+      operationId: quota_billing_quota_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/login:
+    post:
+      tags:
+      - admin
+      summary: Admin Login
+      operationId: admin_login_admin_login_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminLoginIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /admin/users:
+    get:
+      tags:
+      - admin
+      summary: List Users
+      operationId: list_users_admin_users_get
+      parameters:
+      - name: tenant
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/orders:
+    get:
+      tags:
+      - admin
+      summary: List Orders
+      operationId: list_orders_admin_orders_get
+      parameters:
+      - name: tenant
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/stats:
+    get:
+      tags:
+      - admin
+      summary: Stats
+      operationId: stats_admin_stats_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/payments:
+    get:
+      tags:
+      - admin
+      summary: List Payments
+      operationId: list_payments_admin_payments_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/quota/adjust:
+    post:
+      tags:
+      - admin
+      summary: Quota Adjust
+      description: 人工调配额：写 append-only 台账（赠送/回收全留痕），不动 limit。
+      operationId: quota_adjust_admin_quota_adjust_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotaAdjustIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/audit-log:
+    get:
+      tags:
+      - admin
+      summary: Audit Log
+      operationId: audit_log_admin_audit_log_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/tenants:
+    post:
+      tags:
+      - admin
+      summary: Create Tenant
+      description: 新建白标租户（域名唯一）。密钥配置不进 API，由 DBA 直接维护加密列。
+      operationId: create_tenant_admin_tenants_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - admin
+      summary: List Tenants
+      operationId: list_tenants_admin_tenants_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/tenants/{tenant_id}/config:
+    put:
+      tags:
+      - admin
+      summary: Update Tenant Config
+      operationId: update_tenant_config_admin_tenants__tenant_id__config_put
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/distributors:
+    post:
+      tags:
+      - admin
+      summary: Create Distributor
+      operationId: create_distributor_admin_distributors_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DistributorIn'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - admin
+      summary: List Distributors
+      operationId: list_distributors_admin_distributors_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/commissions:
+    get:
+      tags:
+      - admin
+      summary: List Commissions
+      operationId: list_commissions_admin_commissions_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/commissions/{commission_id}/settle:
+    post:
+      tags:
+      - admin
+      summary: Settle Commission
+      description: 结算佣金：pending → settled，并计入代理可提现余额（append 记账，不改历史）。
+      operationId: settle_commission_admin_commissions__commission_id__settle_post
+      parameters:
+      - name: commission_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Commission Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/distributor-transfers:
+    get:
+      tags:
+      - admin
+      summary: List Dist Transfers
+      operationId: list_dist_transfers_admin_distributor_transfers_get
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/distributor-transfers/{transfer_id}/{action}:
+    post:
+      tags:
+      - admin
+      summary: Audit Dist Transfer
+      description: 审核提现：action ∈ {pay, reject}。打款只登记状态，真实出款由财务线下执行。
+      operationId: audit_dist_transfer_admin_distributor_transfers__transfer_id___action__post
+      parameters:
+      - name: transfer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Transfer Id
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Action
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/exports/{kind}.csv:
+    get:
+      tags:
+      - admin
+      summary: Export Csv
+      description: 对账/审计 CSV（UTF-8 BOM，Excel 直接打开不乱码）。
+      operationId: export_csv_admin_exports__kind__csv_get
+      parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Kind
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /admin/reports/summary:
+    get:
+      tags:
+      - admin
+      summary: Report Summary
+      description: 运营日报（近 N 天）：收入、订单、任务、AI 用量。与定时推送共用 app.reports.summary。
+      operationId: report_summary_admin_reports_summary_get
+      parameters:
+      - name: days
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 7
+          title: Days
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /jobs/{job_id}:
+    get:
+      tags:
+      - jobs
+      summary: Get Job
+      operationId: get_job_jobs__job_id__get
+      parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tools/rewrite:
+    post:
+      tags:
+      - tools
+      summary: Rewrite
+      description: 粘贴文本降重/改写（不落库）。
+      operationId: rewrite_tools_rewrite_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/app__routers__tools__RewriteIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tools/detect:
+    post:
+      tags:
+      - tools
+      summary: Detect
+      description: 文本体检：可测量特征 + 启发式提示。非查重、非 AIGC 检测，结论仅供参考。
+      operationId: detect_tools_detect_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tools/ppt:
+    post:
+      tags:
+      - tools
+      summary: Make Ppt
+      description: 按主题生成 PPTX（LLM 出结构化大纲 → python-pptx 渲染，可编辑）。
+      operationId: make_ppt_tools_ppt_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PptIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tools/diagram:
+    post:
+      tags:
+      - tools
+      summary: Make Diagram
+      description: 自然语言 → Mermaid 代码（前端自行渲染；不返回图片，避免黑盒）。
+      operationId: make_diagram_tools_diagram_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiagramIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /formatting/profiles:
+    get:
+      tags:
+      - formatting
+      summary: List Profiles
+      operationId: list_profiles_formatting_profiles_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /payments/orders/{order_id}:
+    post:
+      tags:
+      - payments
+      summary: Create Payment
+      operationId: create_payment_payments_orders__order_id__post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /payments/{serial_no}:
-    get: { summary: 支付状态轮询, x-origin: pay/queryPayStatus, responses: { "200": { description: "{status}" } } }
-
-  /admin/*:
-    get: { summary: 管理端全部接口（RBAC 强制，密钥字段永不出响应）, x-origin: /saas-writing/admin/* —— 原产品匿名可读区域, responses: { "401": { description: 未携带 admin JWT }, "403": { description: 角色不足 } } }
-
+    get:
+      tags:
+      - payments
+      summary: Payment Status
+      operationId: payment_status_payments__serial_no__get
+      parameters:
+      - name: serial_no
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Serial No
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /payments/{serial_no}/confirm:
+    post:
+      tags:
+      - payments
+      summary: Confirm Payment
+      description: mock 模式：付款人本人确认（模拟网关回调）；manual 模式：仅管理员。
+      operationId: confirm_payment_payments__serial_no__confirm_post
+      parameters:
+      - name: serial_no
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Serial No
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /payments:
+    get:
+      tags:
+      - payments
+      summary: My Payments
+      operationId: my_payments_payments_get
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /health:
+    get:
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
 components:
   schemas:
+    AdminLoginIn:
+      properties:
+        username:
+          type: string
+          maxLength: 64
+          minLength: 2
+          title: Username
+        password:
+          type: string
+          maxLength: 128
+          minLength: 6
+          title: Password
+      type: object
+      required:
+      - username
+      - password
+      title: AdminLoginIn
+    ChapterEditIn:
+      properties:
+        content_md:
+          type: string
+          title: Content Md
+        ai_level:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Ai Level
+      type: object
+      required:
+      - content_md
+      title: ChapterEditIn
+    DetectIn:
+      properties:
+        text:
+          type: string
+          maxLength: 200000
+          minLength: 10
+          title: Text
+      type: object
+      required:
+      - text
+      title: DetectIn
+    DiagramIn:
+      properties:
+        description:
+          type: string
+          maxLength: 2000
+          minLength: 4
+          title: Description
+        kind:
+          type: string
+          pattern: ^(flowchart|sequence|architecture)$
+          title: Kind
+          default: flowchart
+      type: object
+      required:
+      - description
+      title: DiagramIn
+    DistLoginIn:
+      properties:
+        code:
+          type: string
+          maxLength: 32
+          minLength: 2
+          title: Code
+        phone:
+          type: string
+          maxLength: 32
+          minLength: 6
+          title: Phone
+      type: object
+      required:
+      - code
+      - phone
+      title: DistLoginIn
+    DistributorIn:
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          minLength: 2
+          title: Name
+        phone:
+          type: string
+          maxLength: 32
+          minLength: 6
+          title: Phone
+        code:
+          type: string
+          maxLength: 32
+          minLength: 2
+          title: Code
+        rate_bps:
+          type: integer
+          maximum: 5000.0
+          minimum: 0.0
+          title: Rate Bps
+          default: 500
+        tenant_id:
+          type: string
+          maxLength: 64
+          title: Tenant Id
+          default: primary
+      type: object
+      required:
+      - name
+      - phone
+      - code
+      title: DistributorIn
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    LoginIn:
+      properties:
+        phone:
+          type: string
+          title: Phone
+        password:
+          type: string
+          title: Password
+      type: object
+      required:
+      - phone
+      - password
+      title: LoginIn
     OrderIn:
-      type: object
-      required: [title, education, word_count]
       properties:
-        title: { type: string }
-        education: { type: string }
-        word_count: { type: integer }
-        language: { type: string, default: zh }
-        writing_type: { type: string, default: thesis }
-    OrderOut:
+        title:
+          type: string
+          maxLength: 255
+          minLength: 2
+          title: Title
+        education:
+          type: string
+          title: Education
+        word_count:
+          type: integer
+          maximum: 200000.0
+          exclusiveMinimum: 0.0
+          title: Word Count
+        language:
+          type: string
+          title: Language
+          default: zh
+        writing_type:
+          type: string
+          title: Writing Type
+          default: thesis
+        distributor_code:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Distributor Code
       type: object
+      required:
+      - title
+      - education
+      - word_count
+      title: OrderIn
+    OutlineIn:
       properties:
-        id: { type: string, format: uuid }
-        order_no: { type: string }
-        title: { type: string }
-        status: { type: string }
-        price_cents: { type: integer }
+        feedback:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Feedback
+      type: object
+      title: OutlineIn
+    PayIn:
+      properties:
+        pay_method:
+          type: string
+          pattern: ^(wechat|alipay)$
+          title: Pay Method
+      type: object
+      required:
+      - pay_method
+      title: PayIn
+    PptIn:
+      properties:
+        topic:
+          type: string
+          maxLength: 200
+          minLength: 2
+          title: Topic
+        audience:
+          type: string
+          maxLength: 64
+          title: Audience
+          default: 学术评审
+        pages:
+          type: integer
+          maximum: 20.0
+          minimum: 4.0
+          title: Pages
+          default: 10
+        wait:
+          type: boolean
+          title: Wait
+          default: true
+      type: object
+      required:
+      - topic
+      title: PptIn
+    QuotaAdjustIn:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        kind:
+          type: string
+          pattern: ^(outline)$
+          title: Kind
+          default: outline
+        delta:
+          type: integer
+          title: Delta
+        reason:
+          type: string
+          maxLength: 200
+          minLength: 2
+          title: Reason
+      type: object
+      required:
+      - user_id
+      - delta
+      - reason
+      title: QuotaAdjustIn
+    RefIn:
+      properties:
+        title:
+          type: string
+          maxLength: 500
+          minLength: 2
+          title: Title
+        authors:
+          items:
+            type: string
+          type: array
+          title: Authors
+          default: []
+        year:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Year
+        doi:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Doi
+        url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Url
+        cited_by:
+          type: integer
+          title: Cited By
+          default: 0
+        kind:
+          type: string
+          title: Kind
+          default: journal
+      type: object
+      required:
+      - title
+      title: RefIn
+    RefsIn:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/RefIn'
+          type: array
+          maxItems: 50
+          minItems: 1
+          title: Items
+      type: object
+      required:
+      - items
+      title: RefsIn
+    RegisterIn:
+      properties:
+        phone:
+          type: string
+          maxLength: 11
+          minLength: 11
+          title: Phone
+        password:
+          type: string
+          maxLength: 64
+          minLength: 8
+          title: Password
+        check_code:
+          type: string
+          maxLength: 16
+          minLength: 1
+          title: Check Code
+      type: object
+      required:
+      - phone
+      - password
+      - check_code
+      title: RegisterIn
+    SmsSendIn:
+      properties:
+        phone:
+          type: string
+          maxLength: 11
+          minLength: 11
+          title: Phone
+        scene:
+          type: string
+          pattern: ^(register|login)$
+          title: Scene
+          default: register
+      type: object
+      required:
+      - phone
+      title: SmsSendIn
+    TokenOut:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+        token_type:
+          type: string
+          title: Token Type
+          default: bearer
+      type: object
+      required:
+      - access_token
+      title: TokenOut
+    TransferIn:
+      properties:
+        amount_cents:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Amount Cents
+        note:
+          anyOf:
+          - type: string
+            maxLength: 200
+          - type: 'null'
+          title: Note
+      type: object
+      required:
+      - amount_cents
+      title: TransferIn
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    VerifyIn:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/VerifyItemIn'
+          type: array
+          maxItems: 50
+          minItems: 1
+          title: Items
+      type: object
+      required:
+      - items
+      title: VerifyIn
+    VerifyItemIn:
+      properties:
+        title:
+          type: string
+          maxLength: 500
+          minLength: 2
+          title: Title
+        doi:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Doi
+        year:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Year
+      type: object
+      required:
+      - title
+      title: VerifyItemIn
+    app__routers__tools__RewriteIn:
+      properties:
+        text:
+          type: string
+          maxLength: 50000
+          minLength: 10
+          title: Text
+        instruction:
+          type: string
+          maxLength: 500
+          title: Instruction
+          default: ''
+      type: object
+      required:
+      - text
+      title: RewriteIn
+    app__routers__writing__RewriteIn:
+      properties:
+        instruction:
+          type: string
+          maxLength: 500
+          title: Instruction
+          default: ''
+      type: object
+      title: RewriteIn
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: '登录/注册返回的 access_token，按 `Authorization: Bearer <token>` 传递。管理端与分销端 token 角色不同，不通用。'
+servers:
+- url: http://localhost:8000
+  description: 本地开发
