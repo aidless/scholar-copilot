@@ -150,6 +150,9 @@ def test_make_diagram_returns_mermaid():
 
 # ---------------------------------------------------------------- PDF 导出（真实 LibreOffice）
 def test_export_pdf_real_conversion():
+    import shutil
+    if not (shutil.which("soffice") or shutil.which("libreoffice")):
+        pytest.skip("本机无 LibreOffice（CI 会安装 libreoffice-writer 后执行此用例）")
     with make_client() as client:
         ut = user_token(client)
         o = client.post("/writing/orders", headers=auth(ut), json={
