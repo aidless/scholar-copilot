@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     rate_limit_llm_per_minute: int = 10
     rate_limit_search_per_minute: int = 30
 
+    # 运营日报定时推送（arq cron）：webhook 为空则不推（不发垃圾请求）
+    report_push_enabled: bool = False
+    report_webhook_url: str = ""       # 任意接受 JSON POST 的地址（企业微信/飞书/Slack 机器人）
+    report_push_hour: int = 9          # 本地时区每天几点推（UTC 小时，0-23）
+    report_push_days: int = 1          # 汇总窗口天数
+
     # CORS 白名单（逗号分隔；默认本地开发地址，生产必须显式收紧）
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

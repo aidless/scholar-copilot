@@ -36,7 +36,25 @@ async def chapter_task(ctx, order_id: str, chapter_index: int) -> dict:
     raise NotImplementedError("v0.2 移植逐章生成")
 
 
+async def push_report_task(ctx) -> dict:
+    """cron 入口：每日运营日报推送（口径与 /admin/reports/summary 同源）。"""
+    from .report import push_daily_report
+
+    return await push_daily_report(ctx)
+
+
+def _cron_jobs():
+    """只在开启推送时注册 cron，避免默认部署凭空跑定时任务。"""
+    if not settings.report_push_enabled:
+        return []
+    from arq.cron import cron
+
+    return [cron(push_report_task, hour=settings.report_push_hour,
+                 minute=0, unique=True, name="daily_report")]
+
+
 class WorkerSettings:
-    functions = [run_job_task, outline_task, chapter_task]
+    functions = [run_job_task, outline_task, chapter_task, push_report_task]
+    cron_jobs = _cron_jobs()
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 4

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-1.4.0-blue)
-![tests](https://img.shields.io/badge/tests-59%20passed-brightgreen)
+![tests](https://img.shields.io/badge/tests-69%20passed-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
 
@@ -98,7 +98,8 @@ cd frontend && npm install && npm run dev
 - [x] v1.2 认证与任务层：短信验证码改为「随机码 + SHA-256 摘要入库 + 5 分钟过期 + 限 5 次尝试」，且**不对手机号注册状态做分支响应**（正面修复原产品静态盐 sign 的注册状态枚举 oracle）；网关抽象 `dev|http` 两驱动；微信扫码登录（dev 可 mock 确认，生产需 `SC_WECHAT_APP_ID/SECRET`）；任务队列抽象 `SC_TASK_QUEUE=inline|arq`——端点统一 `enqueue()`，切 arq 即交独立 worker（`arq app.tasks.worker.WorkerSettings`），端点契约不变；45 项测试通过
 - [x] v1.3 导出与运营报表：LaTeX 导出（`export?format=tex`，ctexart 单文件，特殊字符转义、披露表与免责声明同在）；管理端对账 CSV 导出（订单/支付/佣金/审计四类，UTF-8 BOM、导出动作留审计）；前端补微信扫码入口（dev 模拟确认）与管理台 CSV 按钮；47 项测试通过
 - [x] v1.4 检索与可观测性：文献三源降级（OpenAlex → Crossref → Semantic Scholar）+ DOI/标题去重，OpenAlex 支持 `SC_OPENALEX_MAILTO`（礼貌池）/`SC_OPENALEX_API_KEY`，S2 支持 `SC_SEMANTIC_SCHOLAR_API_KEY`；引用核查在 Crossref 未达 verified 时自动补查 S2 并在 `evidence.source` 标注实际源；任务进度 WebSocket `GET /jobs/{id}/ws?token=`（属主校验失败一律 1008 关闭，不泄露任务存在性）；运营日报 `GET /admin/reports/summary?days=`（收入/新单/新用户/任务分布/token 用量），管理台首页展示；59 项测试通过（含迁移-模型一致性门、时区列门、管理员引导门）
-- [ ] v1.5 计划：PubMed 源、报表定时推送（邮件/Webhook）、导出 LaTeX 编译服务化、前端任务进度条接 WS
+- [x] v1.5 运营闭环：限流可切 Redis 共享计数（`SC_RATE_LIMIT_BACKEND`，多实例不再配额放大）；运营日报定时推送 `push_daily_report`（arq cron，口径与管理台 `/admin/reports/summary` 同源，默认关闭，webhook 载荷同时给结构化 `data` 与纯文本 `text`，失败软返回不刷屏）；69 项测试通过（含限流 Redis 后端 4 项与日报推送 6 项）
+- [ ] v1.6 计划：PubMed 源接入、日报推送支持邮件通道、导出 LaTeX 编译服务化、前端任务进度条接 WS
 
 ## 学术诚信
 

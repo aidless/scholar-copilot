@@ -28,6 +28,18 @@ compose 起来的东西：
 > schema 只有一条真相源：alembic。`SC_DB_AUTO_CREATE` 默认 false，仅本地零依赖试跑（SQLite）时才置 true。
 > 改模型后必须补迁移，否则 `tests/test_migrations_match_models.py` 会红（空库真跑迁移再逐列比对）。
 
+### 运营日报推送（可选）
+
+```bash
+SC_REPORT_PUSH_ENABLED=true
+SC_REPORT_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+SC_REPORT_PUSH_HOUR=9     # UTC 小时
+SC_REPORT_PUSH_DAYS=1     # 汇总窗口
+```
+
+载荷同时含 `msgtype/text`（IM 机器人直接用）与结构化 `data`；口径与
+`GET /admin/reports/summary` 完全同源。关闭时不会发任何外部请求。
+
 ## 2. 本地开发
 
 ```bash

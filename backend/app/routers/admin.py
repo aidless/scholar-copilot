@@ -21,6 +21,7 @@ from ..models import (AdminAuditLog, AdminUser, Commission, Distributor,
                       DistributorTransfer, GenerationJob, PaymentOrder, Tenant,
                       TenantConfig, User, WritingOrder)
 from ..security import make_token, verify_password
+from ..reports import summary
 from ..tenancy import CurrentUser, admin_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -344,30 +345,7 @@ async def export_csv(kind: str, db: AsyncSession = Depends(get_db),
 @router.get("/reports/summary")
 async def report_summary(days: int = 7, db: AsyncSession = Depends(get_db),
                          admin: CurrentUser = Depends(admin_user)):
-    """运营日报（近 N 天）：收入、订单、任务、AI 用量。供定时推送/周报复用。"""
-    from datetime import timedelta
-
+    """运营日报（近 N 天）：收入、订单、任务、AI 用量。与定时推送共用 app.reports.summary。"""
     if not 1 <= days <= 90:
         raise HTTPException(422, "days 需在 1~90 之间")
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-
-    revenue = int((await db.execute(
-        select(func.coalesce(func.sum(PaymentOrder.amount_cents), 0))
-        .where(PaymentOrder.status == "paid", PaymentOrder.created_at >= since))).scalar() or 0)
-    orders_new = int((await db.execute(
-        select(func.count()).select_from(WritingOrder).where(WritingOrder.created_at >= since))).scalar() or 0)
-    jobs_rows = (await db.execute(
-        select(GenerationJob.status, func.count()).where(GenerationJob.created_at >= since)
-        .group_by(GenerationJob.status))).all()
-    tokens = (await db.execute(
-        select(func.coalesce(func.sum(GenerationJob.tokens_in), 0),
-               func.coalesce(func.sum(GenerationJob.tokens_out), 0))
-        .where(GenerationJob.created_at >= since))).one()
-    new_users = int((await db.execute(
-        select(func.count()).select_from(User).where(User.created_at >= since))).scalar() or 0)
-    return {
-        "window_days": days, "since": since.isoformat(),
-        "revenue_cents": revenue, "orders_new": orders_new, "new_users": new_users,
-        "jobs_by_status": {s: c for s, c in jobs_rows},
-        "tokens_in": int(tokens[0] or 0), "tokens_out": int(tokens[1] or 0),
-    }
+    return await summary(db, days)
