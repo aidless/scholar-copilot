@@ -10,7 +10,7 @@ from . import tenancy
 from .routers import (admin, auth, billing, distributor, formatting, jobs,
                       payments, references, review, tenant, tools, writing)
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 OPENAPI_PATH = "/docs"
 
 

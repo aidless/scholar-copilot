@@ -16,7 +16,8 @@ from ..db import get_db
 from ..export.docx_builder import build_thesis_docx
 from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
 from ..tenancy import CurrentUser, current_user, ownership_filter
-from ..tasks.local import launch, run_job
+from ..tasks.local import run_job
+from ..tasks.queue import enqueue
 from ..writing.service import count_words, price_cents, quota_remaining
 
 router = APIRouter(prefix="/writing", tags=["writing"])
@@ -165,7 +166,7 @@ async def gen_outline(order_id: str, body: OutlineIn | None = None,
         if job.status == "failed":
             raise HTTPException(502, f"大纲生成失败：{job.error}")
         return {"job": _job_out(job), "order": _order_out(order)}
-    launch(job.id)
+    await enqueue(job.id)
     return {"job_id": job.id, "status": "queued"}
 
 
@@ -227,7 +228,7 @@ async def gen_chapter(order_id: str, node_id: str, wait: bool = Query(default=Fa
         if job.status == "failed":
             raise HTTPException(502, f"章节生成失败：{job.error}")
         return {"job": _job_out(job), "chapter": _chapter_out(chapter)}
-    launch(job.id)
+    await enqueue(job.id)
     return {"job_id": job.id, "status": "queued"}
 
 
@@ -306,7 +307,7 @@ async def rewrite_chapter(order_id: str, node_id: str, body: RewriteIn | None = 
         if job.status == "failed":
             raise HTTPException(502, f"改写失败：{job.error}")
         return {"job": _job_out(job), "chapter": _chapter_out(chapter)}
-    launch(job.id)
+    await enqueue(job.id)
     return {"job_id": job.id, "status": "queued"}
 
 

@@ -71,7 +71,8 @@ cd frontend && npm install && npm run dev
 - [x] v0.5 支付订单 + 多租户管理端：支付单（服务端价/serial 追踪/mock 网关确认，manual 模式管理员确认，真实商户 webhook 预留 v1.0）；正文生成 402 支付门（大纲免费 3 次）；管理端 JWT RBAC（superadmin/tenant_admin/operator，初始密码仅环境注入、无默认口令）+ 用户/订单/支付/营收统计 + 配额赠送回收（append-only 台账 is_usage 双类行）+ 全动作审计日志；30 项测试 + 真模型支付解锁冒烟通过
 - [x] v1.0 工程加固（可一键自部署）：Dockerfile×2 + docker-compose（healthcheck/依赖顺序/env 内联）+ alembic 初始迁移（10 表，空库 upgrade head 通过）+ 三层限流（登录/LLM/检索，429+Retry-After）+ CORS 白名单 + prompt 注入结构化定界（哨兵+中和，含逃逸单测）+ GitHub Actions CI（后端 pytest + alembic 落地 + 前端 typecheck/build）+ 真正可用的 Web UI（登录/写作台/文献/体检/管理台 6 路由）+ `docs/DEPLOY.md`；34 项测试通过、容器内 /health 与注册冒烟通过
 - [x] v1.1 白标多租户 + 分销 + 演示与图表：按域名解析租户、`GET /tenant/branding` 只暴露品牌白名单（名称/配色/Logo/客服，绝不返回渠道密钥——正面修复原产品 websiteInfo 泄露洞）；分销代理（推广码登录、佣金=服务端价×万分比、只在订单支付成功时生成、结算/提现全走审计日志）；`POST /tools/ppt` 生成可编辑 PPTX、`POST /tools/diagram` 输出 Mermaid 源码（不返回黑盒图片）；`POST /orders/{id}/export?format=pdf` 真实 LibreOffice 转换；新增 alembic 迁移 e1fecb79f92b（5 表 + writing_orders.distributor_code）；40 项测试通过（含 PDF 真实转换与租户不泄密断言）
-- [ ] v1.2 计划：微信扫码登录 + 真实短信网关、arq 队列 worker（现为进程内任务）、LaTeX 导出、OpenAlex 带 key 提高配额、审计报表导出
+- [x] v1.2 认证与任务层：短信验证码改为「随机码 + SHA-256 摘要入库 + 5 分钟过期 + 限 5 次尝试」，且**不对手机号注册状态做分支响应**（正面修复原产品静态盐 sign 的注册状态枚举 oracle）；网关抽象 `dev|http` 两驱动；微信扫码登录（dev 可 mock 确认，生产需 `SC_WECHAT_APP_ID/SECRET`）；任务队列抽象 `SC_TASK_QUEUE=inline|arq`——端点统一 `enqueue()`，切 arq 即交独立 worker（`arq app.tasks.worker.WorkerSettings`），端点契约不变；45 项测试通过
+- [ ] v1.3 计划：LaTeX 导出、OpenAlex 带 key 提高配额、审计报表导出（CSV）、前端微信扫码入口
 
 ## 学术诚信
 

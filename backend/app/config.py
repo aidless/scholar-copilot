@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     sms_hmac_key: str = "change-me-sms"
     # 开发模式：跳过真实短信，验证码固定 000000（生产必须 false）
     sms_dev_mode: bool = True
+    sms_provider: str = "dev"          # dev | http（http 走 sms_api_url 网关）
+    sms_api_url: str = ""
+    sms_api_token: str = ""
+    sms_code_ttl_seconds: int = 300
+    task_queue: str = "inline"         # inline（asyncio）| arq（Redis 队列，多实例部署用）
+    wechat_app_id: str = ""            # 扫码登录（生产需填，空则只有 dev mock 可用）
+    wechat_app_secret: str = ""
 
     # 免费大纲次数（服务端强制，quota_ledger 台账）
     free_outline_limit: int = 3

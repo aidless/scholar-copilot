@@ -294,3 +294,30 @@ CREATE INDEX IF NOT EXISTS ix_distributor_transfers_distributor_id ON distributo
 
 ALTER TABLE writing_orders ADD COLUMN IF NOT EXISTS distributor_code VARCHAR(32);
 CREATE INDEX IF NOT EXISTS ix_writing_orders_distributor_code ON writing_orders(distributor_code);
+
+-- ============================================================
+-- v1.2 短信验证码 + 微信扫码登录会话
+-- 纪律：验证码只存 SHA-256 摘要（phone:scene:code）、5 分钟过期、限 5 次尝试；
+-- 不对「手机号是否注册」做分支响应（原产品正是靠这个差异泄露注册状态）。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sms_codes (
+    id         VARCHAR(32) PRIMARY KEY,
+    phone      VARCHAR(32) NOT NULL,
+    scene      VARCHAR(16) NOT NULL DEFAULT 'register',
+    code_hash  VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    consumed   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_sms_codes_phone ON sms_codes(phone);
+
+CREATE TABLE IF NOT EXISTS wechat_scenes (
+    id           VARCHAR(32) PRIMARY KEY,
+    scene        VARCHAR(64) NOT NULL UNIQUE,
+    status       VARCHAR(16) NOT NULL DEFAULT 'pending',
+    user_id      VARCHAR(32),
+    tenant_id    VARCHAR(64) NOT NULL DEFAULT 'primary',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    confirmed_at TIMESTAMPTZ
+);

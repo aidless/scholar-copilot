@@ -287,3 +287,36 @@ class DistributorTransfer(Base):
     note = Column(String(255))
     created_at = Column(DateTime, default=_now)
     paid_at = Column(DateTime)
+
+
+class SmsCode(Base):
+    """短信验证码（哈希存储 + 过期时间 + 尝试次数），替代静态盐方案。
+
+    原产品 sign = sha256("saas-sign-" + phone) 是固定盐，任何人可离线复算；
+    这里每次发送随机 6 位码、只存 SHA-256 摘要、5 分钟过期、最多试 5 次。
+    """
+
+    __tablename__ = "sms_codes"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    phone = Column(String(32), nullable=False, index=True)
+    scene = Column(String(16), nullable=False, default="register")  # register/login
+    code_hash = Column(String(64), nullable=False)                   # sha256(phone:scene:code)
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    consumed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class WechatScene(Base):
+    """微信扫码登录会话（scene → 已确认用户）。dev 模式可 mock 确认，生产走真实回调。"""
+
+    __tablename__ = "wechat_scenes"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    scene = Column(String(64), nullable=False, unique=True, index=True)
+    status = Column(String(16), nullable=False, default="pending")  # pending/confirmed/expired
+    user_id = Column(String(32))
+    tenant_id = Column(String(64), nullable=False, default="primary")
+    created_at = Column(DateTime, default=_now)
+    confirmed_at = Column(DateTime)

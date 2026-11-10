@@ -11,7 +11,7 @@ _TMP = tempfile.mkdtemp(prefix="sc-test-")
 os.environ["SC_DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP}/test.db"
 os.environ["SC_LLM_PROVIDER"] = "fake"
 os.environ["SC_SMS_DEV_MODE"] = "true"
-os.environ["SC_JWT_SECRET"] = "test-secret"
+os.environ["SC_JWT_SECRET"] = "test-secret-key-with-at-least-32-bytes!"
 os.environ["SC_DB_AUTO_CREATE"] = "true"
 os.environ["SC_PAYMENT_MODE"] = "mock"
 os.environ["SC_ADMIN_INITIAL_PASSWORD"] = "t3st-Adm1n-Pw!"  # lifespan 引导初始管理员

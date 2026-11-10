@@ -11,6 +11,14 @@ async def ctx_info(ctx) -> str:
     return f"worker={ctx.get('worker_name', '?')}"
 
 
+async def run_job_task(ctx, job_id: str) -> dict:
+    """arq 入口：与内联模式共用同一份执行逻辑（tasks/local.run_job）。"""
+    from .local import run_job
+
+    await run_job(job_id)
+    return {"job_id": job_id, "worker": ctx.get("worker_name", "?")}
+
+
 async def outline_task(ctx, order_id: str) -> dict:
     """大纲生成。移植自 thesis_auto_generator 的大纲 prompt（见 PORTING.md §2）。
 
@@ -29,6 +37,6 @@ async def chapter_task(ctx, order_id: str, chapter_index: int) -> dict:
 
 
 class WorkerSettings:
-    functions = [outline_task, chapter_task]
+    functions = [run_job_task, outline_task, chapter_task]
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     max_jobs = 4

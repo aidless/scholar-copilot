@@ -106,3 +106,42 @@ cd backend && SC_DATABASE_URL=postgresql+asyncpg://... alembic upgrade head
 - **branding 返回 primary**：Host 头没传或域名未在 tenants 表登记（检查反向代理是否保留 Host）。
 - **代理提现 400**：可提现 = 已结算佣金 − 已申请/已付，先 settle 佣金。
 - **PDF 502**：`which soffice` 为空，装 LibreOffice；或改用 `format=docx`。
+
+
+## v1.2 新增：短信验证码、微信扫码登录、任务队列
+
+### 1. 迁移
+```bash
+cd backend && alembic upgrade head   # → ff5854424543
+```
+新增 `sms_codes`、`wechat_scenes` 两表。
+
+### 2. 短信验证码
+| 变量 | 说明 |
+|---|---|
+| `SC_SMS_PROVIDER` | `dev`（只打日志，不发真短信）或 `http` |
+| `SC_SMS_API_URL` | http 驱动的网关地址，POST `{phone, code, scene}` |
+| `SC_SMS_API_TOKEN` | 网关 Bearer token（可空） |
+| `SC_SMS_DEV_MODE` | true 时接受万能码 `000000` 并回显 `dev_code`，**生产必须设 false** |
+| `SC_SMS_CODE_TTL_SECONDS` | 验证码有效期，默认 300 |
+
+发送：`POST /auth/sms/send {"phone","scene":"register|login"}`——无论号码是否注册，响应一致。
+校验：`POST /auth/register` 的 `check_code`；一次性消费、5 次错误即失效。
+
+### 3. 微信扫码登录
+- 未配置 `SC_WECHAT_APP_ID`：dev 模式下 `POST /auth/wechat/qrcode` 返回 `mode=dev` 与 `dev://` 场景，
+  用 `POST /auth/wechat/mock-approve {scene, phone}` 模拟扫码确认，再 `GET /auth/wechat/poll?scene=` 取 token。
+- 配置后返回真实 `open.weixin.qq.com` 扫码链接；回调确认需在网关侧把 scene → confirmed（`wechat_scenes` 表）。
+- **生产必须设 `SC_SMS_DEV_MODE=false`，否则 mock-approve 会 403、万能码失效。**
+
+### 4. 任务队列（多实例部署）
+```bash
+# .env
+SC_TASK_QUEUE=arq
+SC_REDIS_URL=redis://redis:6379/0
+# 独立 worker 进程（可多副本）
+arq app.tasks.worker.WorkerSettings
+```
+端点据此把生成任务投递给 worker（返回 job_id，前端照旧轮询 `GET /jobs/{id}`）。
+默认 `inline` 单机即可用，无需 Redis。
+> 说明：本仓库已提供 arq 通道实现与投递单测；本机无 Redis，未做进程级联调（部署环境验证）。
