@@ -66,3 +66,10 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
           NEXT_PUBLIC_API_BASE: http://localhost:8000
         run: npm run build
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+      - name: E2E 关键路径 (Playwright)
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          CI: "true"
+        run: npx playwright test

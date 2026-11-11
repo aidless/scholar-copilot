@@ -159,3 +159,58 @@ async def make_diagram(body: DiagramIn):
         raise HTTPException(502, "模型未返回合法 Mermaid 代码，请重试或换个描述")
     return {"mermaid": code, "kind": body.kind, "model": result.model,
             "tokens_in": result.prompt_tokens, "tokens_out": result.completion_tokens}
+
+
+# ── 图表渲染（v1.9 #3）──────────────────────────────────────────────
+from typing import Any  # noqa: E402
+from ..export.charts import available_types, render_chart  # noqa: E402
+
+
+class ChartSeries(BaseModel):
+    name: str = Field(default="", max_length=64)
+    values: list[float] = Field(min_length=1)
+
+
+class ChartIn(BaseModel):
+    type: str = Field(max_length=16)
+    title: str = Field(default="", max_length=200)
+    labels: list[str] = Field(min_length=1)
+    series: list[ChartSeries] = Field(min_length=1)
+    xlabel: str = Field(default="", max_length=64)
+    ylabel: str = Field(default="", max_length=64)
+
+
+@router.get("/chart/types")
+async def chart_types():
+    return {"types": available_types()}
+
+
+@router.post("/chart")
+async def chart(body: ChartIn):
+    """把结构化图表规格渲染成 PNG（matplotlib 无头后端）。"""
+    spec: dict[str, Any] = body.model_dump()
+    try:
+        png = render_chart(spec)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    return Response(content=png, media_type="image/png",
+                    headers={"Content-Disposition": "inline; filename=chart.png"})
+
+
+# ── 数据分析 / 问卷统计（v1.9 #9）────────────────────────────────────
+from ..analysis import analyze as _analyze_stats  # noqa: E402
+
+
+class StatsIn(BaseModel):
+    columns: list[str] = Field(min_length=1, max_length=200)
+    rows: list[list[Any]] = Field(min_length=1, max_length=50_000)
+    categorical: list[str] = Field(default_factory=list)
+
+
+@router.post("/stats")
+async def stats(body: StatsIn):
+    """对一份表格做描述统计 + 两两 Pearson 相关 + 类别频数分布（纯计算）。"""
+    try:
+        return _analyze_stats(body.columns, body.rows, body.categorical)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))

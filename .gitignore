@@ -13,3 +13,8 @@ node_modules/
 dist/
 build/
 *.egg-info/
+
+# Playwright (前端 E2E)
+frontend/test-results/
+frontend/playwright-report/
+frontend/.playwright/

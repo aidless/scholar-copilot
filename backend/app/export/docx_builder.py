@@ -10,8 +10,9 @@ import re
 from datetime import date
 
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Inches, Pt
 
+from .charts import render_chart
 from .watermark import AI_LEVEL_LABELS, add_disclaimer_page, add_watermark
 
 
@@ -73,8 +74,20 @@ def _render_markdown_block(doc: Document, lines: list[str]) -> None:
         i += 1
 
 
+def add_chart_from_spec(doc: Document, spec: dict, caption: str | None = None) -> None:
+    """把图表规格渲染为 PNG 并插入文档（居中，宽 6 英寸），可选图注。"""
+    png = render_chart(spec)
+    doc.add_picture(io.BytesIO(png), width=Inches(6))
+    doc.paragraphs[-1].alignment = 1  # CENTER（add_picture 追加到最后一个段落）
+    if caption:
+        cap = doc.add_paragraph()
+        cap.alignment = 1
+        run = cap.add_run(caption)
+        run.font.size = Pt(9)
+
+
 def build_thesis_docx(title: str, education: str, chapters: list[dict],
-                      language: str = "zh") -> bytes:
+                      language: str = "zh", charts: list[dict] | None = None) -> bytes:
     """构建完整 DOCX 字节流。
 
     chapters: [{"idx", "node_id", "title", "content_md", "word_count", "ai_level"}]
@@ -108,6 +121,13 @@ def build_thesis_docx(title: str, education: str, chapters: list[dict],
         doc.add_heading(ch["title"], level=1)
         content_md = ch.get("content_md") or ""
         _render_markdown_block(doc, content_md.split("\n"))
+
+    # ── 图表（可选，matplotlib 渲染 PNG 插入）──
+    if charts:
+        doc.add_heading("图表", level=1)
+        for c in charts:
+            spec = c.get("spec") or c
+            add_chart_from_spec(doc, spec, caption=c.get("caption"))
 
     # ── 伦理护栏 ──
     add_disclaimer_page(doc)

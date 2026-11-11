@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 1.9.0
+  version: 1.10.0
   description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
 
@@ -2301,6 +2301,74 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+  /tools/chart/types:
+    get:
+      tags:
+      - tools
+      summary: Chart Types
+      operationId: chart_types_tools_chart_types_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - BearerAuth: []
+  /tools/chart:
+    post:
+      tags:
+      - tools
+      summary: Chart
+      description: 把结构化图表规格渲染成 PNG（matplotlib 无头后端）。
+      operationId: chart_tools_chart_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChartIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /tools/stats:
+    post:
+      tags:
+      - tools
+      summary: Stats
+      description: 对一份表格做描述统计 + 两两 Pearson 相关 + 类别频数分布（纯计算）。
+      operationId: stats_tools_stats_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatsIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /formatting/profiles:
     get:
       tags:
@@ -2735,6 +2803,62 @@ components:
       required:
       - content_md
       title: ChapterEditIn
+    ChartIn:
+      properties:
+        type:
+          type: string
+          maxLength: 16
+          title: Type
+        title:
+          type: string
+          maxLength: 200
+          title: Title
+          default: ''
+        labels:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Labels
+        series:
+          items:
+            $ref: '#/components/schemas/ChartSeries'
+          type: array
+          minItems: 1
+          title: Series
+        xlabel:
+          type: string
+          maxLength: 64
+          title: Xlabel
+          default: ''
+        ylabel:
+          type: string
+          maxLength: 64
+          title: Ylabel
+          default: ''
+      type: object
+      required:
+      - type
+      - labels
+      - series
+      title: ChartIn
+    ChartSeries:
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          title: Name
+          default: ''
+        values:
+          items:
+            type: number
+          type: array
+          minItems: 1
+          title: Values
+      type: object
+      required:
+      - values
+      title: ChartSeries
     DetectIn:
       properties:
         text:
@@ -3052,6 +3176,33 @@ components:
       required:
       - phone
       title: SmsSendIn
+    StatsIn:
+      properties:
+        columns:
+          items:
+            type: string
+          type: array
+          maxItems: 200
+          minItems: 1
+          title: Columns
+        rows:
+          items:
+            items: {}
+            type: array
+          type: array
+          maxItems: 50000
+          minItems: 1
+          title: Rows
+        categorical:
+          items:
+            type: string
+          type: array
+          title: Categorical
+      type: object
+      required:
+      - columns
+      - rows
+      title: StatsIn
     TokenOut:
       properties:
         access_token:
