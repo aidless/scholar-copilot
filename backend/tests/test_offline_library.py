@@ -225,3 +225,92 @@ def test_offline_verify_uses_local_library():
         row = r2.json()["results"][0]
         assert row["state"] == "unverified"
         assert row["evidence"]["source"] == "local"
+
+
+# ── 回归：单行 BibTeX（实测 422「未解析出任何条目」的根因）─────
+SINGLE_LINE_BIB = (
+    '@article{x1, title={Offline First Design}, author={Doe, J. and Roe, R.}, '
+    'year={2021}, journal={J. Systems}, doi={10.1/x1}}'
+)
+
+
+def test_parse_bibtex_single_line_entry():
+    """很多工具（以及手工粘贴）会把条目写成一行，解析器不能因此返回空。"""
+    from app.offline import parse_bibtex
+
+    items = parse_bibtex(SINGLE_LINE_BIB)
+    assert len(items) == 1
+    assert items[0]["title"] == "Offline First Design"
+    assert items[0]["year"] == 2021
+    assert items[0]["doi"] == "10.1/x1"
+    assert items[0]["venue"] == "J. Systems"
+
+
+def test_parse_bibtex_multiple_single_line_entries():
+    from app.offline import parse_bibtex
+
+    text = SINGLE_LINE_BIB + "\n" + (
+        '@book{y2, title={Second Book}, author={Solo, A.}, year={2019}, publisher={P}}')
+    items = parse_bibtex(text)
+    assert [i["title"] for i in items] == ["Offline First Design", "Second Book"]
+    assert items[1]["kind"] == "book"
+
+
+def test_parse_bibtex_quoted_values_and_bare_year():
+    from app.offline import parse_bibtex
+
+    text = '@article{z3, title="Quoted Title", author="Q, U.", year=2018, journal="J"}'
+    items = parse_bibtex(text)
+    assert len(items) == 1
+    assert items[0]["title"] == "Quoted Title"
+    assert items[0]["year"] == 2018
+
+
+def test_parse_bibtex_nested_braces_in_title():
+    from app.offline import parse_bibtex
+
+    text = '@article{n4, title={Deep {GPU} Systems}, author={N, P.}, year={2020}}'
+    items = parse_bibtex(text)
+    assert len(items) == 1
+    assert "Deep" in items[0]["title"] and "GPU" in items[0]["title"]
+
+
+def test_parse_bibtex_skips_entries_without_title():
+    from app.offline import parse_bibtex
+
+    assert parse_bibtex('@article{no5, author={X, Y.}, year={2020}}') == []
+
+
+# ── 回归：检索只做子串匹配时，词序调换/部分词查询全部落空 ──────
+def test_search_local_matches_word_order_independent_query():
+    """「offline design」应命中「Offline First Design」——真实检索不是子串搜索。"""
+    from app.offline import LocalRef, search_local
+
+    items = [LocalRef(title="Offline First Design", authors=["Doe, J."], year=2021,
+                      venue="J. Systems").__dict__]
+    titles = [i["title"] for i in search_local("offline design", items)]
+    assert titles == ["Offline First Design"]
+
+
+def test_search_local_matches_cjk_partial_query():
+    from app.offline import LocalRef, search_local
+
+    items = [LocalRef(title="人工智能在教育领域的应用综述", authors=["张三"], year=2020).__dict__]
+    assert [i["title"] for i in search_local("教育 人工智能", items)] == [
+        "人工智能在教育领域的应用综述"]
+
+
+def test_search_local_does_not_return_unrelated_items():
+    from app.offline import LocalRef, search_local
+
+    items = [LocalRef(title="Offline First Design", year=2021).__dict__,
+             LocalRef(title="量子色动力学中的重整化", year=2019).__dict__]
+    assert [i["title"] for i in search_local("neural machine translation", items)] == []
+
+
+def test_search_local_exact_substring_still_ranks_first():
+    from app.offline import LocalRef, search_local
+
+    items = [LocalRef(title="Design Patterns in Systems", year=2020).__dict__,
+             LocalRef(title="Offline First Design", year=2021).__dict__]
+    assert search_local("offline first design", items)[0]["title"] == "Offline First Design"

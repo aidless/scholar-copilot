@@ -13,8 +13,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-_BIB_ENTRY = re.compile(r"@(\w+)\s*\{\s*([^,]+),(.*?)\n\}", re.S)
-_BIB_FIELD = re.compile(r"(\w+)\s*=\s*[{\"](.*?)[}\"]\s*,?\s*(?=\n\s*\w+\s*=|\Z)", re.S)
+# 条目头：@type{key，body 由花括号配对确定（原文用 "\n}" 收尾，单行条目一律解析失败）
+_BIB_HEAD = re.compile(r"@(\w+)\s*\{\s*([^,\n]*)")
 
 
 def _clean(value: str) -> str:
@@ -47,13 +47,66 @@ class LocalRef:
         return self.as_dict().get(key, default)
 
 
+def _iter_bib_entries(text: str):
+    """按花括号配对切出每条 BibTeX 条目，返回 (entry_type, key, body)。
+
+    不用正则整段匹配：字段值里的嵌套花括号（`title={Deep {GPU} Systems}`）会让
+    惰性匹配提前收尾；手写扫描虽然朴素，但对「单行 / 多行 / 嵌套」一视同仁。
+    """
+    i, n = 0, len(text)
+    while i < n:
+        m = _BIB_HEAD.search(text, i)
+        if not m:
+            return
+        entry_type, key = m.group(1), m.group(2).strip()
+        j, depth = m.end(), 1
+        while j < n and depth:
+            ch = text[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        yield entry_type, key, text[m.end():j]
+        i = j + 1
+
+
+def _bib_fields(body: str) -> dict[str, str]:
+    """按顶层逗号切字段，再按第一个 `=` 拆名值（值可带 {} 或 "")。"""
+    parts, buf, depth = [], [], 0
+    for ch in body:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+
+    fields: dict[str, str] = {}
+    for part in parts:
+        if "=" not in part:
+            continue
+        name, _, value = part.partition("=")
+        value = value.strip().rstrip(",").strip()
+        if len(value) >= 2 and value[0] in "{\"" and value[-1] in "}\"":
+            value = value[1:-1]
+        fields[name.strip().lower()] = value
+    return fields
+
+
 def parse_bibtex(text: str) -> list[LocalRef]:
-    """解析 BibTeX。只认最常用的花括号/引号字段，嵌套花括号做剥除处理。"""
+    """解析 BibTeX（单行/多行/嵌套花括号/引号值都支持）。"""
     out: list[LocalRef] = []
     if not text or not text.strip():
         return out
-    for entry_type, _key, body in _BIB_ENTRY.findall(text):
-        fields = {k.lower(): _clean(v) for k, v in _BIB_FIELD.findall(body + "\n}")}
+    for entry_type, key, body in _iter_bib_entries(text):
+        fields = {k: _clean(v) for k, v in _bib_fields(body).items()}
         title = fields.get("title", "")
         if not title:
             continue
@@ -67,7 +120,7 @@ def parse_bibtex(text: str) -> list[LocalRef]:
         out.append(LocalRef(title=title, authors=authors, year=year, venue=venue,
                             doi=fields.get("doi") or None,
                             abstract=fields.get("abstract", ""), kind=kind,
-                            raw=f"@{entry_type}{{{ _key }}}"))
+                            raw=f"@{entry_type}{{{key}}}"))
     return out
 
 
@@ -114,22 +167,53 @@ def parse_cnki(text: str) -> list[LocalRef]:
     return out
 
 
+def _query_tokens(q: str) -> list[str]:
+    """查询分词：CJK 走二元组（中文没有空格），拉丁按空白/标点切词。"""
+    text = _clean(q).lower()
+    tokens = [w for w in re.split(r"[^0-9a-z\u4e00-\u9fff]+", text) if w]
+    out: list[str] = []
+    for tok in tokens:
+        if all("\u4e00" <= ch <= "\u9fff" for ch in tok) and len(tok) > 2:
+            out.extend(tok[i:i + 2] for i in range(len(tok) - 1))
+        else:
+            out.append(tok)
+    return out
+
+
 def search_local(q: str, items: list[dict], limit: int = 8) -> list[dict]:
-    """本地检索：标题/作者/来源/DOI 子串匹配，标题命中优先。"""
+    """本地检索：子串命中优先，其次按查询词覆盖率排序。
+
+    只做子串匹配是不够的——用户输入「offline design」查「Offline First Design」
+    会零命中，等于离线状态下没有检索。这里补一层词覆盖率（≥0.5 才收），
+    既能命中词序不同的标题，也不会把不相关条目捞进来。
+    """
     needle = (q or "").strip().lower()
     if not needle:
         return []
-    hits: list[tuple[int, dict]] = []
+    tokens = _query_tokens(needle)
+
+    hits: list[tuple[float, float, dict]] = []
     for item in items:
         title = (item.get("title") or "").lower()
         hay = " ".join([title, " ".join(item.get("authors") or []),
                         str(item.get("venue") or ""), str(item.get("doi") or "")]).lower()
         if needle in title:
-            hits.append((2, item))
-        elif needle in hay:
-            hits.append((1, item))
-    hits.sort(key=lambda pair: -pair[0])
-    return [item for _score, item in hits[:limit]]
+            hits.append((2.0, 1.0, item))
+            continue
+        if needle in hay:
+            hits.append((1.0, 1.0, item))
+            continue
+        if not tokens:
+            continue
+        covered = sum(1 for tok in tokens if tok in hay)
+        coverage = covered / len(tokens)
+        if coverage >= 0.5:
+            # 标题命中比作者/来源命中更重要
+            in_title = sum(1 for tok in tokens if tok in title) / len(tokens)
+            hits.append((0.5 + in_title, coverage, item))
+
+    hits.sort(key=lambda trip: (-trip[0], -trip[1]))
+    return [item for _rank, _cov, item in hits[:limit]]
 
 
 def title_similarity(a: str, b: str) -> float:

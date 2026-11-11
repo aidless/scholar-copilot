@@ -126,7 +126,26 @@ API 用例覆盖「生成后链条里有 outline → 改稿后追加一条 edit 
   因为在离线环境里「查不到」不等于「不存在」，判 fake 是错误的知识主张；
 - `/references/library`（导入、列表、检索），按 `title+year` 去重并返回 `imported/skipped`。
 
-**实测**：`tests/test_offline_library.py` 11 项。
+**两个实测暴露的缺陷（都已修，且都是「看起来能用其实是假的」）**：
+
+1. **单行 BibTeX 解析不出来**：原实现用 `@(\w+)\{...,(.*?)\n\}` 整段匹配，要求条目以「换行 + }」收尾；
+   真网络实测把一条标准单行 BibTeX 粘进去 → `422 未解析出任何条目`。
+   修法：改成花括号配对扫描（`_iter_bib_entries` + `_bib_fields`），单行/多行/嵌套花括号/引号值/裸年份一律通吃。
+2. **检索只是子串匹配**：查 `offline design` 找不到 `Offline First Design`（词序不同即零命中），
+   等于「离线状态下没有检索」。修法：先子串命中（精确优先），再按查询词覆盖率补一层
+   （Latin 按词、CJK 按二元组；覆盖率 ≥0.5 才收），既救回词序调换，也不会把无关条目捞进来。
+
+**实测（离线模式 `SC_OFFLINE_MODE=true` 真网络）**：
+
+| 请求 | 结果 |
+| --- | --- |
+| `POST /references/library/import`（单行 BibTeX） | 201 `{"imported":1,"skipped":0}`；重复导入 201 `{"imported":0,"skipped":1}` |
+| `POST /references/library/search {"q":"offline design"}` | 命中 `Offline First Design`（`library_size:1`） |
+| `POST /references/verify`（库内标题） | `verified` similarity 1.0，`evidence.source="local"` |
+| `POST /references/verify`（库外标题） | `unverified` similarity 0.0606，`hint="本地库未命中；离线模式不判定文献真伪"` |
+| `GET /references/search?q=offline+design` | `source: "local"`，返回本地条目（不出网） |
+
+单元测试：`tests/test_offline_library.py` **20 项**（含新增 4 项单行 BibTeX 回归 + 4 项检索回归）。
 
 ---
 
