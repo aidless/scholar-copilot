@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 1.8.0
+  version: 1.9.0
   description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
 
@@ -558,6 +558,132 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+  /writing/orders/{order_id}/outline/versions:
+    get:
+      tags:
+      - writing
+      summary: List Outline Versions
+      operationId: list_outline_versions_writing_orders__order_id__outline_versions_get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/outline/versions/{version}:
+    get:
+      tags:
+      - writing
+      summary: Get Outline Version
+      operationId: get_outline_version_writing_orders__order_id__outline_versions__version__get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/outline/rollback:
+    post:
+      tags:
+      - writing
+      summary: Rollback Outline
+      description: '回滚到历史版本：append-only——不改历史行，而是追加一个新版本（version=max+1）
+
+        内容取自目标版本；默认同时按目标版本 tree 重建章节骨架（会清空旧章节内容，
+
+        语义等同「重新采用该版大纲」）。'
+      operationId: rollback_outline_writing_orders__order_id__outline_rollback_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: rebuild_chapters
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+          title: Rebuild Chapters
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollbackIn'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders/{order_id}/chapters:
     get:
       tags:
@@ -578,6 +704,47 @@ paths:
           type: string
           default: ''
           title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/chapters/reorder:
+    post:
+      tags:
+      - writing
+      summary: Reorder Chapters
+      description: 按传入顺序重排章节（idx 从 1 连续重编）。node_ids 必须不重不漏。
+      operationId: reorder_chapters_writing_orders__order_id__chapters_reorder_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderIn'
       responses:
         '200':
           description: Successful Response
@@ -684,6 +851,43 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+    delete:
+      tags:
+      - writing
+      summary: Delete Chapter
+      description: 删除单个章节并把剩余章节 idx 连续重编（不留下空洞）。
+      operationId: delete_chapter_writing_orders__order_id__chapters__node_id__delete
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Node Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /writing/orders/{order_id}/chapters/{node_id}/rewrite:
     post:
       tags:
@@ -725,6 +929,48 @@ paths:
               - $ref: '#/components/schemas/app__routers__writing__RewriteIn'
               - type: 'null'
               title: Body
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /writing/orders/{order_id}/abstract:
+    post:
+      tags:
+      - writing
+      summary: Gen Abstract
+      description: 基于已完成章节正文生成中/英文摘要（不落库，即时返回）。
+      operationId: gen_abstract_writing_orders__order_id__abstract_post
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: lang
+        in: query
+        required: false
+        schema:
+          type: string
+          default: zh
+          title: Lang
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
       responses:
         '200':
           description: Successful Response
@@ -2067,6 +2313,216 @@ paths:
           content:
             application/json:
               schema: {}
+  /files:
+    post:
+      tags:
+      - files
+      summary: Upload File
+      operationId: upload_file_files_post
+      parameters:
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_file_files_post'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    get:
+      tags:
+      - files
+      summary: List Files
+      operationId: list_files_files_get
+      parameters:
+      - name: order_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Order Id
+      - name: kind
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kind
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /files/{file_id}:
+    get:
+      tags:
+      - files
+      summary: Get File
+      operationId: get_file_files__file_id__get
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+    delete:
+      tags:
+      - files
+      summary: Delete File
+      operationId: delete_file_files__file_id__delete
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /files/{file_id}/download:
+    get:
+      tags:
+      - files
+      summary: Download File
+      operationId: download_file_files__file_id__download_get
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /files/{file_id}/signed-url:
+    get:
+      tags:
+      - files
+      summary: Signed Url
+      description: S3 后端返回临时预签名 URL；本地后端返回应用内下载路径。
+      operationId: signed_url_files__file_id__signed_url_get
+      parameters:
+      - name: file_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: File Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /payments/orders/{order_id}:
     post:
       tags:
@@ -2246,6 +2702,25 @@ components:
       - username
       - password
       title: AdminLoginIn
+    Body_upload_file_files_post:
+      properties:
+        upload:
+          type: string
+          format: binary
+          title: Upload
+        kind:
+          type: string
+          title: Kind
+          default: attachment
+        order_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Order Id
+      type: object
+      required:
+      - upload
+      title: Body_upload_file_files_post
     ChapterEditIn:
       properties:
         content_md:
@@ -2541,6 +3016,26 @@ components:
       - password
       - check_code
       title: RegisterIn
+    ReorderIn:
+      properties:
+        node_ids:
+          items:
+            type: string
+          type: array
+          title: Node Ids
+      type: object
+      required:
+      - node_ids
+      title: ReorderIn
+    RollbackIn:
+      properties:
+        version:
+          type: integer
+          title: Version
+      type: object
+      required:
+      - version
+      title: RollbackIn
     SmsSendIn:
       properties:
         phone:

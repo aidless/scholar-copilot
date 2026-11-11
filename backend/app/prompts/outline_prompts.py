@@ -76,6 +76,9 @@ def build_outline_user_prompt(
     keywords: list[str],
     discipline: str,
     target_word_count: int = 15000,
+    writing_type: str = "thesis",
+    genre_label: str = "",
+    genre_hint: str = "",
 ) -> str:
     """构建大纲生成的 User Prompt
 
@@ -89,13 +92,19 @@ def build_outline_user_prompt(
         str: 完整的 User Prompt
     """
     keywords_str = "、".join(keywords) if keywords else "（请根据主题自动提炼）"
+    genre_block = ""
+    if genre_hint:
+        genre_block = f"""
+**文体类型**：{genre_label or writing_type}
+**文体结构要求**：{genre_hint}
+"""
     return f"""请为以下论文生成一份详细的大纲：
 
 **论文主题**：{topic}
 **关键词**：{keywords_str}
 **学科方向**：{discipline}
 **目标字数**：{target_word_count:,} 字
-
+{genre_block}
 请严格按照格式要求输出 Markdown 大纲。"""
 
 

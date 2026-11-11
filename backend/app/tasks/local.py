@@ -25,6 +25,7 @@ from ..prompts.outline_prompts import (
 )
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt
 from ..prompts.safety import wrap_untrusted
+from ..writing import genres
 from ..writing.outline_parser import get_chapters, parse_outline_markdown
 from ..writing.service import count_words
 
@@ -112,9 +113,12 @@ async def _run_outline(db, job: GenerationJob) -> None:
         user_prompt = build_outline_feedback_prompt(prev.content_md, wrap_untrusted(feedback, "用户反馈"))
     else:
         system = OUTLINE_SYSTEM_PROMPT
+        _wt = getattr(order, "writing_type", "thesis") or "thesis"
         user_prompt = build_outline_user_prompt(
             topic=order.title, keywords=[], discipline=order.education,
             target_word_count=order.word_count,
+            writing_type=_wt, genre_label=genres.label_of(_wt),
+            genre_hint=genres.outline_hint(_wt),
         )
 
     job.progress = 30

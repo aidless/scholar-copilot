@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     # 可观测性（v1.8）：一行一个 JSON 的日志（便于 Loki/ELK 采集）
     log_json: bool = False
 
+    # 对象存储（v1.9）：local 默认（clone 即跑）；s3 需装 boto3 并配 SC_S3_*
+    storage_backend: str = "local"          # local | s3
+    storage_dir: str = "./data/uploads"     # local 后端的落盘根目录
+    max_upload_mb: int = 20                 # 单文件大小上限
+    s3_endpoint: str = ""                   # 兼容 MinIO：如 http://minio:9000
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = ""
+
     model_config = {"env_file": ".env", "env_prefix": "SC_"}
 
 

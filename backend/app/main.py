@@ -11,10 +11,10 @@ from .config import settings
 from .observability import configure_logging, metrics, new_request_id, request_id_var
 
 from . import tenancy
-from .routers import (admin, auth, billing, distributor, formatting, jobs,
+from .routers import (admin, auth, billing, distributor, files, formatting, jobs,
                       payments, references, review, tenant, tools, writing)
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 log = logging.getLogger(__name__)
 OPENAPI_PATH = "/docs"
 
@@ -108,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(tools.router)
     app.include_router(formatting.router)
+    app.include_router(files.router)
     app.include_router(payments.router)
 
     @app.get("/health")

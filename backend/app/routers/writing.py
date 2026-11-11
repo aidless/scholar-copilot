@@ -8,16 +8,25 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_db
 from ..export.docx_builder import build_thesis_docx
+from ..llm.registry import get_provider
 from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
+from ..prompts.abstract_prompts import (
+    ABSTRACT_SYSTEM_EN,
+    ABSTRACT_SYSTEM_ZH,
+    build_abstract_user_prompt,
+)
+from ..ratelimit import rate_limit_llm
 from ..tenancy import CurrentUser, current_user, ownership_filter
 from ..tasks.local import run_job
 from ..tasks.queue import enqueue
+from ..writing import genres
+from ..writing.outline_parser import get_chapters, parse_outline_markdown
 from ..writing.service import count_words, price_cents, quota_remaining
 
 router = APIRouter(prefix="/writing", tags=["writing"])
@@ -90,6 +99,9 @@ async def create_order(body: OrderIn, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(current_user)):
     if body.education not in _EDUCATIONS:
         raise HTTPException(422, f"education 必须是 {'/'.join(_EDUCATIONS)}")
+    if not genres.is_valid(body.writing_type):
+        raise HTTPException(
+            422, f"writing_type 必须是 {'/'.join(genres.GENRES)}")
     order = WritingOrder(
         tenant_id=user.tenant_id, owner_id=user.user_id,
         title=body.title, education=body.education,
@@ -183,6 +195,78 @@ async def get_outline(order_id: str, db: AsyncSession = Depends(get_db),
     return {"version": row.version, "content_md": row.content_md}
 
 
+@router.get("/orders/{order_id}/outline/versions")
+async def list_outline_versions(order_id: str, db: AsyncSession = Depends(get_db),
+                                user: CurrentUser = Depends(current_user)):
+    await _get_owned_order(db, user, order_id)
+    rows = (await db.execute(
+        select(OrderOutline).where(OrderOutline.order_id == order_id)
+        .order_by(OrderOutline.version)
+    )).scalars().all()
+    return [{"version": r.version,
+             "created_at": r.created_at.isoformat() if r.created_at else None}
+            for r in rows]
+
+
+@router.get("/orders/{order_id}/outline/versions/{version}")
+async def get_outline_version(order_id: str, version: int,
+                              db: AsyncSession = Depends(get_db),
+                              user: CurrentUser = Depends(current_user)):
+    await _get_owned_order(db, user, order_id)
+    row = (await db.execute(
+        select(OrderOutline).where(
+            OrderOutline.order_id == order_id, OrderOutline.version == version)
+    )).scalar()
+    if row is None:
+        raise HTTPException(404, f"大纲版本 {version} 不存在")
+    return {"version": row.version, "content_md": row.content_md}
+
+
+class RollbackIn(BaseModel):
+    version: int
+
+
+@router.post("/orders/{order_id}/outline/rollback")
+async def rollback_outline(order_id: str, body: RollbackIn,
+                           rebuild_chapters: bool = Query(default=True),
+                           db: AsyncSession = Depends(get_db),
+                           user: CurrentUser = Depends(current_user)):
+    """回滚到历史版本：append-only——不改历史行，而是追加一个新版本（version=max+1）
+    内容取自目标版本；默认同时按目标版本 tree 重建章节骨架（会清空旧章节内容，
+    语义等同「重新采用该版大纲」）。"""
+    order = await _get_owned_order(db, user, order_id)
+    target = (await db.execute(
+        select(OrderOutline).where(
+            OrderOutline.order_id == order_id, OrderOutline.version == body.version)
+    )).scalar()
+    if target is None:
+        raise HTTPException(404, f"目标版本 {body.version} 不存在")
+    maxv = (await db.execute(
+        select(func.max(OrderOutline.version)).where(OrderOutline.order_id == order_id)
+    )).scalar() or 0
+    newv = maxv + 1
+    db.add(OrderOutline(tenant_id=order.tenant_id, order_id=order_id, version=newv,
+                        content_md=target.content_md, tree_json=target.tree_json))
+    if rebuild_chapters:
+        old = (await db.execute(
+            select(OrderChapter).where(OrderChapter.order_id == order_id)
+        )).scalars().all()
+        for ch in old:
+            await db.delete(ch)
+        await db.flush()
+        nodes = get_chapters(target.tree_json or {})
+        for i, node in enumerate(nodes):
+            db.add(OrderChapter(
+                tenant_id=order.tenant_id, order_id=order_id, node_id=node["id"],
+                idx=i + 1, level=1, title=node["title"], description=node.get("content", ""),
+                status="pending", ai_level="C", word_count=0,
+            ))
+        order.status = "outline_done"
+    await db.commit()
+    return {"version": newv, "rolled_back_from": body.version,
+            "chapters_rebuilt": bool(rebuild_chapters)}
+
+
 # ── 章节 ─────────────────────────────────────────────────────
 
 @router.get("/orders/{order_id}/chapters")
@@ -194,6 +278,29 @@ async def list_chapters(order_id: str, db: AsyncSession = Depends(get_db),
         .order_by(OrderChapter.idx)
     )).scalars().all()
     return [_chapter_out(c) for c in rows]
+
+
+class ReorderIn(BaseModel):
+    node_ids: list[str]
+
+
+@router.post("/orders/{order_id}/chapters/reorder")
+async def reorder_chapters(order_id: str, body: ReorderIn,
+                           db: AsyncSession = Depends(get_db),
+                           user: CurrentUser = Depends(current_user)):
+    """按传入顺序重排章节（idx 从 1 连续重编）。node_ids 必须不重不漏。"""
+    await _get_owned_order(db, user, order_id)
+    rows = (await db.execute(
+        select(OrderChapter).where(OrderChapter.order_id == order_id)
+    )).scalars().all()
+    existing = {c.node_id for c in rows}
+    if len(body.node_ids) != len(existing) or set(body.node_ids) != existing:
+        raise HTTPException(422, "node_ids 必须恰好包含该订单全部章节（不重不漏）")
+    by_id = {c.node_id: c for c in rows}
+    for i, nid in enumerate(body.node_ids):
+        by_id[nid].idx = i + 1
+    await db.commit()
+    return [_chapter_out(by_id[n]) for n in body.node_ids]
 
 
 @router.post("/orders/{order_id}/chapters/{node_id}")
@@ -269,6 +376,30 @@ async def edit_chapter(order_id: str, node_id: str, body: ChapterEditIn,
     return _chapter_out(chapter)
 
 
+@router.delete("/orders/{order_id}/chapters/{node_id}", status_code=204)
+async def delete_chapter(order_id: str, node_id: str,
+                         db: AsyncSession = Depends(get_db),
+                         user: CurrentUser = Depends(current_user)):
+    """删除单个章节并把剩余章节 idx 连续重编（不留下空洞）。"""
+    await _get_owned_order(db, user, order_id)
+    chapter = (await db.execute(
+        select(OrderChapter).where(
+            OrderChapter.order_id == order_id, OrderChapter.node_id == node_id)
+    )).scalar()
+    if chapter is None:
+        raise HTTPException(404, "章节不存在")
+    await db.delete(chapter)
+    await db.flush()
+    rest = (await db.execute(
+        select(OrderChapter).where(OrderChapter.order_id == order_id)
+        .order_by(OrderChapter.idx)
+    )).scalars().all()
+    for i, c in enumerate(rest):
+        c.idx = i + 1
+    await db.commit()
+    return Response(status_code=204)
+
+
 # ── 章节降重/改写 ────────────────────────────────────────────
 
 class RewriteIn(BaseModel):
@@ -309,6 +440,37 @@ async def rewrite_chapter(order_id: str, node_id: str, body: RewriteIn | None = 
         return {"job": _job_out(job), "chapter": _chapter_out(chapter)}
     await enqueue(job.id)
     return {"job_id": job.id, "status": "queued"}
+
+
+# ── 摘要生成 ─────────────────────────────────────────────────
+
+@router.post("/orders/{order_id}/abstract", dependencies=[Depends(rate_limit_llm)])
+async def gen_abstract(order_id: str, lang: str = Query(default="zh"),
+                       db: AsyncSession = Depends(get_db),
+                       user: CurrentUser = Depends(current_user)):
+    """基于已完成章节正文生成中/英文摘要（不落库，即时返回）。"""
+    order = await _get_owned_order(db, user, order_id)
+    if lang not in ("zh", "en"):
+        raise HTTPException(422, "lang 必须是 zh 或 en")
+    chapters = (await db.execute(
+        select(OrderChapter).where(
+            OrderChapter.order_id == order_id, OrderChapter.status == "done")
+        .order_by(OrderChapter.idx)
+    )).scalars().all()
+    if not chapters:
+        raise HTTPException(409, "还没有已完成的章节，无法生成摘要")
+    body_md = "\n\n".join(f"## {c.title}\n{c.content_md or ''}" for c in chapters)
+    system = ABSTRACT_SYSTEM_ZH if lang == "zh" else ABSTRACT_SYSTEM_EN
+    provider = get_provider()
+    result = await provider.complete(
+        build_abstract_user_prompt(order.title, body_md), system=system, max_tokens=1024)
+    return {
+        "abstract": result.text.strip(),
+        "lang": lang,
+        "model": result.model,
+        "tokens_in": result.prompt_tokens,
+        "tokens_out": result.completion_tokens,
+    }
 
 
 # ── 导出 ─────────────────────────────────────────────────────

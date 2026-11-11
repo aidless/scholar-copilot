@@ -324,3 +324,25 @@ class WechatScene(Base):
     tenant_id = Column(String(64), nullable=False, default="primary")
     created_at = Column(DateTime(timezone=True), default=_now)
     confirmed_at = Column(DateTime(timezone=True))
+
+
+class UploadedFile(Base):
+    """用户上传文件（开题报告/降重稿/排版模板等）。
+
+    内容落对象存储（见 app/storage.py），本表只存元数据 + storage_key。
+    tenant_id + owner_id 双列，访问须过 ownership_filter（IDOR 纪律同其他资源）。
+    """
+
+    __tablename__ = "uploaded_files"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    order_id = Column(String(32), index=True)  # 可空：不绑定具体订单的临时上传
+    kind = Column(String(32), nullable=False, default="attachment")  # 用途分类
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(128), nullable=False, default="")
+    size = Column(Integer, nullable=False, default=0)
+    storage_key = Column(String(255), nullable=False)
+    sha256 = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_now)
