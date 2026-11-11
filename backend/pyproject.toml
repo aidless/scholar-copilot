@@ -1,6 +1,6 @@
 [project]
 name = "scholar-copilot-backend"
-version = "1.10.0"
+version = "1.11.0"
 description = "开源学术写作 Copilot 后端（FastAPI + PostgreSQL + arq）"
 requires-python = ">=3.11"
 dependencies = [

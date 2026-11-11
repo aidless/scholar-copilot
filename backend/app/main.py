@@ -14,7 +14,7 @@ from . import tenancy
 from .routers import (admin, auth, billing, distributor, files, formatting, jobs,
                       payments, references, review, tenant, tools, writing)
 
-VERSION = "1.10.0"
+VERSION = "1.11.0"
 log = logging.getLogger(__name__)
 OPENAPI_PATH = "/docs"
 

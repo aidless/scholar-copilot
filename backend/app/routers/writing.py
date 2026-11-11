@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_db
 from ..export.docx_builder import build_thesis_docx
-from ..llm.registry import get_provider
+from ..llm.router import complete_for
 from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
 from ..prompts.abstract_prompts import (
     ABSTRACT_SYSTEM_EN,
@@ -461,8 +461,8 @@ async def gen_abstract(order_id: str, lang: str = Query(default="zh"),
         raise HTTPException(409, "还没有已完成的章节，无法生成摘要")
     body_md = "\n\n".join(f"## {c.title}\n{c.content_md or ''}" for c in chapters)
     system = ABSTRACT_SYSTEM_ZH if lang == "zh" else ABSTRACT_SYSTEM_EN
-    provider = get_provider()
-    result = await provider.complete(
+    result = await complete_for(
+        "abstract",
         build_abstract_user_prompt(order.title, body_md), system=system, max_tokens=1024)
     return {
         "abstract": result.text.strip(),

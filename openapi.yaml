@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 1.10.0
+  version: 1.11.0
   description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
 
@@ -2369,6 +2369,48 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+  /tools/models:
+    get:
+      tags:
+      - tools
+      summary: Models
+      description: 当前路由表（任务 → 模型链）+ 成本表，供前端展示与人工选择。
+      operationId: models_tools_models_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - BearerAuth: []
+  /tools/models/cost:
+    post:
+      tags:
+      - tools
+      summary: Models Cost
+      description: 同一 token 用量下，各候选模型的预估成本（元）对比。
+      operationId: models_cost_tools_models_cost_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CostCompareIn'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /formatting/profiles:
     get:
       tags:
@@ -2859,6 +2901,28 @@ components:
       required:
       - values
       title: ChartSeries
+    CostCompareIn:
+      properties:
+        task:
+          type: string
+          maxLength: 32
+          title: Task
+          default: default
+        tokens_in:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Tokens In
+        tokens_out:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Tokens Out
+      type: object
+      required:
+      - tokens_in
+      - tokens_out
+      title: CostCompareIn
     DetectIn:
       properties:
         text:

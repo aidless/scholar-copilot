@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..db import get_db
-from ..llm.registry import get_provider
+from ..llm.router import complete_for
 from ..ratelimit import rate_limit_llm
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt
 from ..prompts.safety import wrap_untrusted
@@ -39,8 +39,8 @@ class RewriteIn(BaseModel):
 @router.post("/rewrite", dependencies=[Depends(rate_limit_llm)])
 async def rewrite(body: RewriteIn):
     """粘贴文本降重/改写（不落库）。"""
-    provider = get_provider()
-    result = await provider.complete(
+    result = await complete_for(
+        "rewrite",
         build_rewrite_user_prompt(wrap_untrusted(body.text, "待改写正文"), body.instruction),
         system=REWRITE_SYSTEM_PROMPT, max_tokens=8192,
     )
@@ -121,8 +121,8 @@ class PptIn(BaseModel):
 @router.post("/ppt", dependencies=[Depends(rate_limit_llm)])
 async def make_ppt(body: PptIn):
     """按主题生成 PPTX（LLM 出结构化大纲 → python-pptx 渲染，可编辑）。"""
-    provider = get_provider()
-    result = await provider.complete(
+    result = await complete_for(
+        "ppt",
         build_ppt_user_prompt(body.topic, body.audience, body.pages),
         system=PPT_SYSTEM_PROMPT, max_tokens=2048,
     )
@@ -147,8 +147,8 @@ class DiagramIn(BaseModel):
 @router.post("/diagram", dependencies=[Depends(rate_limit_llm)])
 async def make_diagram(body: DiagramIn):
     """自然语言 → Mermaid 代码（前端自行渲染；不返回图片，避免黑盒）。"""
-    provider = get_provider()
-    result = await provider.complete(
+    result = await complete_for(
+        "diagram",
         build_diagram_user_prompt(wrap_untrusted(body.description, "图表描述"), body.kind),
         system=DIAGRAM_SYSTEM_PROMPT, max_tokens=1200,
     )
@@ -214,3 +214,30 @@ async def stats(body: StatsIn):
         return _analyze_stats(body.columns, body.rows, body.categorical)
     except ValueError as exc:
         raise HTTPException(422, str(exc))
+
+
+# ── 多模型路由与成本对比（v1.11 #22）─────────────────────────────────
+from ..llm.router import estimate_cost, routing_table  # noqa: E402
+
+
+@router.get("/models")
+async def models():
+    """当前路由表（任务 → 模型链）+ 成本表，供前端展示与人工选择。"""
+    return routing_table()
+
+
+class CostCompareIn(BaseModel):
+    task: str = Field(default="default", max_length=32)
+    tokens_in: int = Field(ge=0, le=10_000_000)
+    tokens_out: int = Field(ge=0, le=10_000_000)
+
+
+@router.post("/models/cost")
+async def models_cost(body: CostCompareIn):
+    """同一 token 用量下，各候选模型的预估成本（元）对比。"""
+    from ..llm.router import routes_for
+    rows = [{"model": m, "cost_cny": estimate_cost(m, body.tokens_in, body.tokens_out)}
+            for m in routes_for(body.task)]
+    rows.sort(key=lambda r: r["cost_cny"])
+    return {"task": body.task, "tokens_in": body.tokens_in,
+            "tokens_out": body.tokens_out, "options": rows}

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from ..db import _engine_and_session
-from ..llm.registry import get_provider
+from ..llm.router import complete_for
 from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
 from ..prompts.chapter_prompts import (
     CHAPTER_SYSTEM_PROMPT,
@@ -124,8 +124,7 @@ async def _run_outline(db, job: GenerationJob) -> None:
     job.progress = 30
     await db.commit()
 
-    provider = get_provider()
-    result = await provider.complete(user_prompt, system=system, max_tokens=8192)
+    result = await complete_for("outline", user_prompt, system=system, max_tokens=8192)
     tree = parse_outline_markdown(result.text)  # 解析失败 → job failed + 退款
     chapter_nodes = get_chapters(tree)
 
@@ -207,8 +206,7 @@ async def _run_chapter(db, job: GenerationJob) -> None:
 
     job.progress = 30
     await db.commit()
-    provider = get_provider()
-    result = await provider.complete(user_prompt, system=CHAPTER_SYSTEM_PROMPT, max_tokens=8192)
+    result = await complete_for("chapter", user_prompt, system=CHAPTER_SYSTEM_PROMPT, max_tokens=8192)
 
     chapter.content_md = result.text
     chapter.word_count = count_words(result.text)
@@ -247,8 +245,8 @@ async def _run_rewrite(db, job: GenerationJob) -> None:
     job.progress = 30
     await db.commit()
 
-    provider = get_provider()
-    result = await provider.complete(
+    result = await complete_for(
+        "rewrite",
         build_rewrite_user_prompt(chapter.content_md, instruction),
         system=REWRITE_SYSTEM_PROMPT, max_tokens=8192,
     )

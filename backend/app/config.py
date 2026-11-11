@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
+    # 多模型路由（v1.11 #22）：JSON 形如 {"outline":["deepseek-chat","qwen-plus"],"default":["deepseek-chat"]}
+    llm_routes: str = ""
+    # 降级链（逗号分隔），在 llm_routes 未指定某任务时生效
+    llm_fallback_models: str = ""
 
     # 多租户：主域。子域/自定义域通过 tenants 表解析
     primary_domain: str = "localhost:3000"
