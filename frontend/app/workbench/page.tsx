@@ -29,6 +29,10 @@ export default function Workbench() {
   const [words, setWords] = useState(12000);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 导出选项 v1.8：格式档案（学校模板）+ 文件格式
+  const [profiles, setProfiles] = useState<{ key: string; label: string }[]>([]);
+  const [profile, setProfile] = useState("default");
+  const [fmt, setFmt] = useState("docx");
   // 正在跑的生成任务：提交后立刻拿到 job_id，进度由 WebSocket 推（不可用则降级轮询）
   const [activeJob, setActiveJob] = useState<string | null>(null);
   const { state: jobState, transport } = useJobProgress(activeJob);
@@ -43,6 +47,12 @@ export default function Workbench() {
   const loadChapters = useCallback(async (orderId: string) => {
     try { setChapters(await api<Chapter[]>(`/writing/orders/${orderId}/chapters`)); }
     catch (e: any) { setMsg(`加载章节失败：${e.message}`); }
+  }, []);
+
+  useEffect(() => {
+    api<{ key: string; label: string }[]>("/formatting/profiles")
+      .then((r) => setProfiles(r))
+      .catch(() => {});
   }, []);
 
   useEffect(() => { if (!tokenStore.get()) { setMsg("请先在首页登录"); return; } loadOrders(); }, [loadOrders]);
@@ -127,18 +137,25 @@ export default function Workbench() {
     } catch (err: any) { setMsg(`支付失败：${err.message}`); } finally { setBusy(false); }
   }
 
+  const EXT: Record<string, string> = { docx: "docx", pdf: "pdf", tex: "tex", latexpdf: "pdf" };
+
   async function exportDocx() {
     if (!cur) return;
     setBusy(true);
     try {
-      const res = await api<Response>(`/writing/orders/${cur.id}/export`, { method: "POST", raw: true });
+      const qs = new URLSearchParams();
+      if (profile && profile !== "default") qs.set("profile", profile);
+      qs.set("format", fmt);
+      const res = await api<Response>(`/writing/orders/${cur.id}/export?${qs.toString()}`,
+        { method: "POST", raw: true });
       const blob = await (res as unknown as Response).blob();
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = `${cur.title || "thesis"}.docx`;
+      a.download = `${cur.title || "thesis"}.${EXT[fmt] || "docx"}`;
       a.click();
       URL.revokeObjectURL(a.href);
-      setMsg("已下载 DOCX（含水印/AI 参与度披露表/免责声明）");
+      const tag = profile !== "default" ? `（模板：${profiles.find((p) => p.key === profile)?.label || profile}）` : "";
+      setMsg(`已下载 ${fmt.toUpperCase()}${tag}（含水印/AI 参与度披露表/免责声明）`);
       await loadOrders();
     } catch (err: any) { setMsg(`导出失败：${err.message}`); } finally { setBusy(false); }
   }
@@ -188,7 +205,17 @@ export default function Workbench() {
                 <span className="text-xs text-neutral-500">{STATUS_ZH[cur.status] || cur.status}</span>
                 <button disabled={busy} onClick={genOutline} className="border rounded px-3 py-1 disabled:opacity-50">生成大纲（免费 3 次）</button>
                 <button disabled={busy} onClick={pay} className="border rounded px-3 py-1 disabled:opacity-50">支付（mock）</button>
-                <button disabled={busy} onClick={exportDocx} className="border rounded px-3 py-1 disabled:opacity-50">导出 DOCX</button>
+                <select className="border rounded px-2 py-1" value={profile} onChange={(e) => setProfile(e.target.value)} title="格式档案（学校模板）">
+                  <option value="default">默认版式</option>
+                  {profiles.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+                </select>
+                <select className="border rounded px-2 py-1" value={fmt} onChange={(e) => setFmt(e.target.value)} title="导出格式">
+                  <option value="docx">DOCX</option>
+                  <option value="pdf">PDF</option>
+                  <option value="tex">LaTeX 源码</option>
+                  <option value="latexpdf">LaTeX→PDF</option>
+                </select>
+                <button disabled={busy} onClick={exportDocx} className="border rounded px-3 py-1 disabled:opacity-50">导出</button>
               </div>
 
               {activeJob && (

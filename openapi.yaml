@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Scholar Copilot API
-  version: 1.7.0
+  version: 1.8.0
   description: 'Scholar Copilot 后端契约（由 FastAPI 从代码导出，勿手改）。
 
 
@@ -895,6 +895,63 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - BearerAuth: []
+  /references/styles:
+    get:
+      tags:
+      - references
+      summary: List Citation Styles
+      description: 可用引用格式（前端下拉用）。
+      operationId: list_citation_styles_references_styles_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - BearerAuth: []
+  /references/orders/{order_id}/export:
+    get:
+      tags:
+      - references
+      summary: Export Order Refs
+      description: 把订单挂载的文献导出成指定引用格式（gb7714/apa/ieee/bibtex/ris）。
+      operationId: export_order_refs_references_orders__order_id__export_get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: style
+        in: query
+        required: false
+        schema:
+          type: string
+          default: gb7714
+          title: Style
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
   /references/verify:
     post:
       tags:
@@ -968,6 +1025,57 @@ paths:
         schema:
           type: string
           title: Order Id
+      - name: only
+        in: query
+        required: false
+        schema:
+          type: string
+          description: 逗号分隔，只看某几条规则，如 ref_invalid,number_without_citation
+          default: ''
+          title: Only
+        description: 逗号分隔，只看某几条规则，如 ref_invalid,number_without_citation
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - BearerAuth: []
+  /review/orders/{order_id}/audit/summary:
+    get:
+      tags:
+      - review
+      summary: Audit Summary
+      description: 轻量版：只看 verdict + summary，前端徽章/角标用。
+      operationId: audit_summary_review_orders__order_id__audit_summary_get
+      parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Order Id
+      - name: authorization
+        in: header
+        required: false
+        schema:
+          type: string
+          default: ''
+          title: Authorization
       responses:
         '200':
           description: Successful Response
@@ -2106,6 +2214,19 @@ paths:
           content:
             application/json:
               schema: {}
+  /metrics:
+    get:
+      summary: Prometheus Metrics
+      description: Prometheus 文本暴露格式（无第三方依赖）。
+      operationId: prometheus_metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - BearerAuth: []
 components:
   schemas:
     AdminLoginIn:

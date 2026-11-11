@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     # CORS 白名单（逗号分隔；默认本地开发地址，生产必须显式收紧）
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # 可观测性（v1.8）：一行一个 JSON 的日志（便于 Loki/ELK 采集）
+    log_json: bool = False
+
     model_config = {"env_file": ".env", "env_prefix": "SC_"}
 
 

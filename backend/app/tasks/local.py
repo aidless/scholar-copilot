@@ -62,6 +62,12 @@ async def run_job(job_id: str) -> None:
             job.progress = 100
             job.finished_at = _now()
             await db.commit()
+            # 可观测性：把本次任务 token 消耗计入 /metrics（失败不影响主流程）
+            try:
+                from ..observability import metrics as _m
+                _m.observe_tokens(job.kind, job.tokens_in, job.tokens_out)
+            except Exception:  # noqa: BLE001
+                pass
         except Exception as exc:  # noqa: BLE001——任务失败必须落库而非炸进程
             log.exception("job %s failed", job_id)
             await db.rollback()
