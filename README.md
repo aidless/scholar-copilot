@@ -1,8 +1,8 @@
 # Scholar Copilot
 
 [![CI](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/aidless/scholar-copilot/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-1.11.0-blue)
-![tests](https://img.shields.io/badge/tests-207%20tests-brightgreen)
+![version](https://img.shields.io/badge/version-1.12.0-blue)
+![tests](https://img.shields.io/badge/tests-297%20tests-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![node](https://img.shields.io/badge/node-20-339933)
 
@@ -139,6 +139,8 @@ python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 
 - [x] v1.8 假功能补真（P0）：①`review/orders/{id}/audit` 从 501 空壳变真审计引擎（引用有效性/正文引用标号越界/未引用文献/数字无出处/AI 参与度标记不一致/空章节/字数漂移七类规则，`verdict` + 逐条 issue + 免责声明，`only=` 可按类过滤，另有 `/audit/summary` 只出结论）；②引用格式导出 `GET /references/orders/{id}/export?style=gb7714|apa|ieee|bibtex|ris`（真实规则渲染 + 正确后缀/媒体类型 + `GET /references/styles` 列可用）；③可观测性：`GET /metrics`（Prometheus 文本零依赖，压路由模板降基数）+ `X-Request-Id` 贯穿 + `SC_LOG_JSON` 结构化日志 + LLM token 计入指标；④前端写作台接入 `formatting/profiles` 学校模板与 docx/pdf/tex/latexpdf 四格式导出。29 项新测试（引用格式 11/审计 12/可观测 6），全套 161 项通过
 - [x] v1.7 导出 LaTeX 编译服务化：`format=latexpdf` → `build_thesis_tex` + `tex_bytes_to_pdf`（xelatex 两遍编译、非交互模式、nonstopmode）；无 TeX → 502 明确报错；CI 装 texlive-xetex/lang-chinese 让真实编译用例执行；测试 5 项（含「未安装 vs 编译失败」强断言 RED→GREEN）
 - [x] v1.11 多模型路由与降级：新建 `backend/app/llm/router.py`——按任务类型（大纲/章节/摘要/改写/图表/PPT）选模型链，`SC_LLM_ROUTES`（JSON，非法只 warning 不崩）优先、未配时退回 `SC_LLM_MODEL` + `SC_LLM_FALLBACK_MODELS`；`complete_for()` 逐模型试、失败自动降级、全挂才报错（错误信息带每个模型的失败原因）；成本可对比：`GET /tools/models` 列各任务候选链 + `POST /tools/models/cost` 按估算成本升序（价格表写死在 `COST_TABLE`，保证数字可复算）；全部调用点改走路由；7 项测试
+
+- [x] v1.12 商业化 + 差异化（十项）：①内容指纹链 `backend/app/provenance.py` + `generation_provenance` 表（大纲/生成/改写/改稿各记一次 sha256 与相似度，`GET /writing/orders/{id}/provenance` 返回链条与「人工改过的章节」，AI 参与度不再靠自证）；②引用证据链 Top-N `verify_citation(top_k=)` 返回候选+相似度，`POST /references/verify/evidence` 附条形图规格、`/verify/evidence/chart` 直接出 PNG；③真查重/AIGC 可解释自查 `backend/app/similarity.py`（CJK 二元组 tokenize、余弦、可点击的重复片段偏移、5 类 AI 特征各带证据句）+ `POST /tools/selfcheck|aigc-features`；④学校模板库 `backend/app/export/templates.py`（严格 spec 校验、失败不静默补默认值）+ `format_templates` 表 + 管理端 CRUD（租户内 key 冲突 409），内置模板一律标注「示例」；⑤token 级计费 `backend/app/billing.py`（`usage_records`/`accounts`/`account_ledger` 三表、成本按 `COST_TABLE` 折算、流水 append-only 可复算）+ `/billing/plans|usage|account|topup|subscribe`；⑥兑换码与拼团 `POST /billing/redeem`（一码一用）、`/billing/group-buys*`（满员一次性结算，任一余额不足整团不结算）、管理端批量建码；⑦离线模式 `SC_OFFLINE_MODE` + 本地文献库（BibTeX/CNKI 解析、`/references/library*` 导入检索），离线态参考文献不判 fake 只标 unverified；⑧导出产物落对象存储 `export_artifacts` 表 + `X-Export-Id` + 签名 URL/重新下载；⑨管理台补租户/分销/佣金结算/提现审核四块 UI；⑩i18n（`backend/app/i18n.py` 文案目录 + 提示词按订单语言切中英，前端 `lib/i18n.ts` 语言切换）；全套 297 项测试通过
 
 ## 学术诚信
 

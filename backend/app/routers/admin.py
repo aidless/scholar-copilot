@@ -18,8 +18,8 @@ import io
 from datetime import datetime, timezone
 
 from ..models import (AdminAuditLog, AdminUser, Commission, Distributor,
-                      DistributorTransfer, GenerationJob, PaymentOrder, Tenant,
-                      TenantConfig, User, WritingOrder)
+                      DistributorTransfer, FormatTemplate, GenerationJob, PaymentOrder,
+                      RedeemCode, Tenant, TenantConfig, User, WritingOrder)
 from ..security import make_token, verify_password
 from ..reports import summary
 from ..tenancy import CurrentUser, admin_user
@@ -169,6 +169,63 @@ async def create_tenant(body: dict, db: AsyncSession = Depends(get_db),
                  {"name": tenant.name, "domain": tenant.domain, "plan": tenant.plan})
     await db.commit()
     return {"id": tenant.id, "name": tenant.name, "domain": tenant.domain, "plan": tenant.plan}
+
+
+class FormatTemplateIn(BaseModel):
+    key: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    school: str = Field(default="", max_length=128)
+    degree: str = Field(default="", max_length=32)
+    spec: dict
+
+
+@router.post("/format-templates", status_code=201)
+async def create_format_template(body: FormatTemplateIn, db: AsyncSession = Depends(get_db),
+                                 admin: CurrentUser = Depends(admin_user)):
+    """自建格式模板（租户内 key 唯一）。规格非法直接 422，不静默补默认值。"""
+    from ..export.templates import validate_spec
+
+    try:
+        spec = validate_spec(body.spec)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    tenant_id = admin.tenant_id or "primary"
+    exists = (await db.execute(
+        select(FormatTemplate).where(
+            FormatTemplate.tenant_id == tenant_id, FormatTemplate.key == body.key)
+    )).scalar()
+    if exists is not None:
+        raise HTTPException(409, "该 key 已存在")
+    row = FormatTemplate(tenant_id=tenant_id, key=body.key, name=body.name,
+                         school=body.school, degree=body.degree, spec_json=spec)
+    db.add(row)
+    await db.flush()
+    await _audit(db, admin, "format_template.create", {"id": row.id},
+                 {"key": row.key, "school": row.school, "degree": row.degree})
+    await db.commit()
+    return {"id": row.id, "key": row.key}
+
+
+@router.get("/format-templates")
+async def list_format_templates(db: AsyncSession = Depends(get_db),
+                                admin: CurrentUser = Depends(admin_user)):
+    rows = (await db.execute(
+        select(FormatTemplate).order_by(FormatTemplate.created_at)
+    )).scalars().all()
+    return [{"id": r.id, "key": r.key, "name": r.name, "school": r.school,
+             "degree": r.degree, "spec": r.spec_json} for r in rows]
+
+
+@router.delete("/format-templates/{tpl_id}", status_code=204)
+async def delete_format_template(tpl_id: str, db: AsyncSession = Depends(get_db),
+                                 admin: CurrentUser = Depends(admin_user)):
+    row = await db.get(FormatTemplate, tpl_id)
+    if row is None:
+        raise HTTPException(404, "模板不存在")
+    await db.delete(row)
+    await _audit(db, admin, "format_template.delete", {"id": tpl_id}, {"key": row.key})
+    await db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/tenants")
@@ -349,3 +406,54 @@ async def report_summary(days: int = 7, db: AsyncSession = Depends(get_db),
     if not 1 <= days <= 90:
         raise HTTPException(422, "days 需在 1~90 之间")
     return await summary(db, days)
+
+
+# ── v1.12 #17：兑换码管理 ─────────────────────────────────
+
+class RedeemBatchIn(BaseModel):
+    batch: str = Field(default="", max_length=64)
+    amount_cents: int = Field(gt=0, le=10_000_000)
+    count: int = Field(default=1, ge=1, le=500)
+
+
+def _new_code() -> str:
+    import secrets
+    return "SC" + secrets.token_hex(5).upper()
+
+
+@router.post("/redeem-codes", status_code=201)
+async def create_redeem_codes(body: RedeemBatchIn, db: AsyncSession = Depends(get_db),
+                              admin: CurrentUser = Depends(admin_user)):
+    """批量生成兑换码（租户内）。返回明文码——只在此刻可见，落库就是它本身。"""
+    codes: list[str] = []
+    for _ in range(body.count):
+        for _try in range(20):
+            code = _new_code()
+            if await db.get(RedeemCode, code) is None:
+                break
+        else:
+            raise HTTPException(500, "兑换码生成冲突，请重试")
+        db.add(RedeemCode(code=code, tenant_id=admin.tenant_id, batch=body.batch,
+                          amount_cents=body.amount_cents))
+        codes.append(code)
+    await _audit(db, admin, "redeem_code.create",
+                 target={"batch": body.batch},
+                 detail={"count": body.count, "amount_cents": body.amount_cents})
+    await db.commit()
+    return {"batch": body.batch, "amount_cents": body.amount_cents, "codes": codes}
+
+
+@router.get("/redeem-codes")
+async def list_redeem_codes(batch: str | None = None, limit: int = 200,
+                            db: AsyncSession = Depends(get_db),
+                            admin: CurrentUser = Depends(admin_user)):
+    stmt = select(RedeemCode).where(RedeemCode.tenant_id == admin.tenant_id)
+    if batch:
+        stmt = stmt.where(RedeemCode.batch == batch)
+    rows = (await db.execute(stmt.order_by(RedeemCode.created_at.desc())
+                             .limit(min(max(limit, 1), 1000)))).scalars().all()
+    return {"codes": [{"code": r.code, "batch": r.batch,
+                       "amount_cents": r.amount_cents, "used_by": r.used_by,
+                       "used_at": r.used_at.isoformat() if r.used_at else None,
+                       "created_at": r.created_at.isoformat() if r.created_at else None}
+                      for r in rows]}

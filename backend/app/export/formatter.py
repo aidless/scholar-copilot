@@ -15,6 +15,7 @@ from docx.shared import Cm, Pt
 # 通用格式档案（值对齐国内高校学位论文常见规范；确认为「常见默认」而非某校官方）
 FORMAT_PROFILES: dict[str, dict] = {
     "本科-通用": {
+        "school": "通用", "degree": "本科",
         "label": "本科通用：正文宋体小四 1.5 倍行距，章标题黑体三号居中",
         "body": {"east": "宋体", "latin": "Times New Roman", "size_pt": 12,
                  "line_spacing": 1.5, "first_line_indent_pt": 24},
@@ -24,6 +25,7 @@ FORMAT_PROFILES: dict[str, dict] = {
         "page": {"top_cm": 2.54, "bottom_cm": 2.54, "left_cm": 3.0, "right_cm": 2.5},
     },
     "硕士-通用": {
+        "school": "通用", "degree": "硕士",
         "label": "硕士通用：正文宋体小四 1.5 倍行距，章标题黑体三号居中，节标题黑体四号",
         "body": {"east": "宋体", "latin": "Times New Roman", "size_pt": 12,
                  "line_spacing": 1.5, "first_line_indent_pt": 24},
@@ -33,6 +35,7 @@ FORMAT_PROFILES: dict[str, dict] = {
         "page": {"top_cm": 3.0, "bottom_cm": 2.5, "left_cm": 3.0, "right_cm": 2.5},
     },
     "博士-通用": {
+        "school": "通用", "degree": "博士",
         "label": "博士通用：正文宋体小四 1.5 倍行距，章标题黑体二号居中",
         "body": {"east": "宋体", "latin": "Times New Roman", "size_pt": 12,
                  "line_spacing": 1.5, "first_line_indent_pt": 24},
@@ -42,6 +45,7 @@ FORMAT_PROFILES: dict[str, dict] = {
         "page": {"top_cm": 3.0, "bottom_cm": 2.5, "left_cm": 3.0, "right_cm": 2.5},
     },
     "英文-通用": {
+        "school": "通用", "degree": "英文",
         "label": "English generic: Times New Roman 12pt, 1.5 spacing, Arial headings",
         "body": {"east": "宋体", "latin": "Times New Roman", "size_pt": 12,
                  "line_spacing": 1.5, "first_line_indent_pt": 0},
@@ -65,9 +69,13 @@ def _set_style_font(style, spec: dict, default_latin: str = "Times New Roman") -
     rfonts.set(qn("w:eastAsia"), spec.get("east", "宋体"))
 
 
-def apply_format_profile(docx_bytes: bytes, profile_key: str) -> bytes:
-    """全文重排版：样式（Normal/Heading 1-3）+ 页边距；不改文字内容。"""
-    profile = FORMAT_PROFILES.get(profile_key)
+def apply_format_profile(docx_bytes: bytes, profile_key: str,
+                         spec: dict | None = None) -> bytes:
+    """全文重排版：样式（Normal/Heading 1-3）+ 页边距；不改文字内容。
+
+    spec 给了就用它（租户自建模板 / 校样例走这条），否则按 key 查内置 4 档案。
+    """
+    profile = spec if spec is not None else FORMAT_PROFILES.get(profile_key)
     if profile is None:
         raise KeyError(profile_key)
 

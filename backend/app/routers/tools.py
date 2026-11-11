@@ -17,6 +17,7 @@ from ..prompts.safety import wrap_untrusted
 from ..prompts.diagram_prompts import DIAGRAM_SYSTEM_PROMPT, build_diagram_user_prompt
 from ..prompts.ppt_prompts import PPT_SYSTEM_PROMPT, build_ppt_user_prompt
 from ..export.pptx_builder import build_pptx, parse_ppt_spec
+from ..similarity import aigc_features
 from fastapi import Response
 from urllib.parse import quote
 
@@ -96,6 +97,7 @@ async def detect(body: DetectIn):
         },
         "cliche": {"hits": cliche_hits, "per_1000": per_k(sum(cliche_hits.values()))},
         "repeats": repeats,
+        "aigc_features": aigc_features(text),
         "advice": [],
         "disclaimer": "启发式体检，非查重率/AIGC 检测率；数字仅描述文本特征，不作合规结论。",
     }
@@ -241,3 +243,38 @@ async def models_cost(body: CostCompareIn):
     rows.sort(key=lambda r: r["cost_cny"])
     return {"task": body.task, "tokens_in": body.tokens_in,
             "tokens_out": body.tokens_out, "options": rows}
+
+
+# ── 真查重/AIGC 可解释自查（v1.12 #8）───────────────────────────────
+from ..similarity import aigc_features, selfcheck  # noqa: E402
+
+
+class SelfCheckRef(BaseModel):
+    id: str = Field(max_length=64)
+    title: str = Field(default="", max_length=500)
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+class SelfCheckIn(BaseModel):
+    text: str = Field(min_length=20, max_length=200_000)
+    references: list[SelfCheckRef] = Field(min_length=1, max_length=100)
+
+
+@router.post("/selfcheck")
+async def selfcheck_endpoint(body: SelfCheckIn):
+    """本地重合度自查：与**你提供的**参照语料比对，逐条给可点击的命中片段。
+
+    不是查重率、不是 AIGC 鉴定——结论必须能顺着 evidence 回到原文。
+    """
+    return selfcheck(body.text, [r.model_dump() for r in body.references])
+
+
+class AigcFeatureIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+
+
+@router.post("/aigc-features")
+async def aigc_features_endpoint(body: AigcFeatureIn):
+    """AIGC 文本的可测量特征（句长变异、套话密度、连接词密度…），每条带原文证据。"""
+    return {"features": aigc_features(body.text),
+            "disclaimer": "特征描述「文本长得像不像模型写的」，不是 AIGC 鉴定结论。"}

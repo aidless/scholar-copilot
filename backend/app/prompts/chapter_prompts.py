@@ -153,3 +153,20 @@ CITATION_GUIDELINES = """
 - 引用的文献应有代表性、时效性（优先近5年）
 - 每章至少引用3-5篇相关文献
 """
+
+
+# ── 英文版系统提示（v1.12 #15） ─────────────────────────────
+CHAPTER_SYSTEM_PROMPT_EN = """You are an experienced academic writer producing one thesis chapter.
+
+Requirements:
+1. Write in formal academic English, roughly the requested word count;
+2. Keep the argument coherent: claim -> evidence -> reasoning -> transition;
+3. When citing, use bracketed numerals [1] [2] that match the reference list;
+4. Do not fabricate data or citations; state limitations where evidence is thin;
+5. Output only the chapter body in Markdown, no meta commentary."""
+
+
+def chapter_system_prompt(lang: str | None = None) -> str:
+    from ..i18n import normalize_lang
+
+    return CHAPTER_SYSTEM_PROMPT_EN if normalize_lang(lang) == "en" else CHAPTER_SYSTEM_PROMPT

@@ -4,6 +4,8 @@ IDOR 修复点（对照逆向报告 P1-2）：全部资源访问先过 ownership
 非本人/不存在一律统一 404——不区分「不存在」与「不属于你」。
 价格纪律：客户端传的任何价格字段一律忽略，服务端按 billing 公式重算。
 """
+import logging
+
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -15,7 +17,8 @@ from ..config import settings
 from ..db import get_db
 from ..export.docx_builder import build_thesis_docx
 from ..llm.router import complete_for
-from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
+from ..models import (ExportArtifact, GenerationJob, OrderChapter, OrderOutline,
+                       QuotaLedger, WritingOrder)
 from ..prompts.abstract_prompts import (
     ABSTRACT_SYSTEM_EN,
     ABSTRACT_SYSTEM_ZH,
@@ -26,8 +29,11 @@ from ..tenancy import CurrentUser, current_user, ownership_filter
 from ..tasks.local import run_job
 from ..tasks.queue import enqueue
 from ..writing import genres
+from ..provenance import chain_for_order, record_event
 from ..writing.outline_parser import get_chapters, parse_outline_markdown
 from ..writing.service import count_words, price_cents, quota_remaining
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/writing", tags=["writing"])
 
@@ -356,6 +362,8 @@ async def edit_chapter(order_id: str, node_id: str, body: ChapterEditIn,
     if chapter is None:
         raise HTTPException(404, "章节不存在")
 
+    prev_content = chapter.content_md  # #19 指纹链：改稿前的原文
+    prev_level = chapter.ai_level
     chapter.content_md = body.content_md
     chapter.word_count = count_words(body.content_md)
     chapter.status = "done"
@@ -372,8 +380,43 @@ async def edit_chapter(order_id: str, node_id: str, body: ChapterEditIn,
     )).scalars().all()
     if not remaining and order.status in ("writing", "writing_done"):
         order.status = "writing_done"
+
+    # #19 指纹链：改稿必须留痕——「A→B」升级的客观依据是相似度 < 1.0
+    await record_event(db, tenant_id=user.tenant_id, order_id=order_id,
+                       node_id=node_id, kind="edit", content=body.content_md,
+                       ai_level=chapter.ai_level, prev_content=prev_content,
+                       actor=user.user_id)
     await db.commit()
     return _chapter_out(chapter)
+
+
+@router.get("/orders/{order_id}/provenance")
+async def get_provenance(order_id: str, db: AsyncSession = Depends(get_db),
+                         user: CurrentUser = Depends(current_user)):
+    """内容指纹链（append-only）：AI 参与度 A/B/C 的可审计凭据。
+
+    每条记录 = 内容 sha256 + 当时声明的 ai_level + 与上一版的相似度。
+    「AI 初稿被人工改过」= 链上出现 kind=edit 且 similarity < 1.0。
+    """
+    await _get_owned_order(db, user, order_id)
+    chain = await chain_for_order(db, order_id)
+    # 汇总：每个节点最新的层级声明 + 是否有人工改稿痕迹
+    latest: dict[str, dict] = {}
+    for item in chain:
+        latest[item["node_id"]] = item
+    edited_nodes = sorted({
+        item["node_id"] for item in chain
+        if item["kind"] in ("edit", "rewrite")
+        and item["similarity"] is not None and item["similarity"] < 1.0
+    })
+    return {
+        "order_id": order_id,
+        "chain": chain,
+        "latest_levels": {k: v["ai_level"] for k, v in latest.items()},
+        "human_edited_nodes": edited_nodes,
+        "disclaimer": "指纹链为本系统生成过程的自证记录，内容指纹对空白不敏感；"
+                      "相似度为编辑前后文本的相似度，不能替代第三方查重结论。",
+    }
 
 
 @router.delete("/orders/{order_id}/chapters/{node_id}", status_code=204)
@@ -464,6 +507,14 @@ async def gen_abstract(order_id: str, lang: str = Query(default="zh"),
     result = await complete_for(
         "abstract",
         build_abstract_user_prompt(order.title, body_md), system=system, max_tokens=1024)
+    # #18：摘要也是一次 LLM 调用，同样要落用量（否则账单里凭空少一块）
+    from ..billing import record_usage
+
+    await record_usage(db, tenant_id=user.tenant_id, owner_id=user.user_id,
+                       kind="abstract", model=result.model,
+                       tokens_in=result.prompt_tokens, tokens_out=result.completion_tokens,
+                       order_id=order_id)
+    await db.commit()
     return {
         "abstract": result.text.strip(),
         "lang": lang,
@@ -501,12 +552,15 @@ async def export_order(order_id: str, profile: str = Query(default="default"),
         language=order.language,
     )
     if profile != "default":
-        try:
-            from ..export.formatter import apply_format_profile
-            data = apply_format_profile(data, profile)
-        except KeyError:
+        # v1.12 #10：内置（通用 + 校样例）与租户自建模板共用同一解析器
+        from ..export.formatter import apply_format_profile
+        from .formatting import resolve_profile
+
+        spec = await resolve_profile(db, profile)
+        if spec is None:
             raise HTTPException(
-                422, f"未知格式 profile：{profile}；可用值见 GET /formatting/profiles") from None
+                422, f"未知格式 profile：{profile}；可用值见 GET /formatting/profiles")
+        data = apply_format_profile(data, profile, spec=spec)
     if fmt == "tex":
         from ..export.latex import build_thesis_tex
         data = build_thesis_tex(
@@ -542,9 +596,87 @@ async def export_order(order_id: str, profile: str = Query(default="default"),
         media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         filename = quote(f"{order.title}.docx")
     order.status = "exported"
+
+    # v1.12 #14：导出即归档（本地磁盘或 S3），并给一个可换签名链接的 id
+    from ..storage import get_storage, make_key, sha256_hex
+
+    storage = get_storage()
+    key = make_key(f"exports/{user.tenant_id}", "." + (fmt if fmt != "latexpdf" else "pdf"))
+    try:
+        storage.save(key, data)
+    except Exception as exc:  # 归档失败不该让用户拿不到文件
+        log.warning("导出归档失败（%s），本次只返回文件流", exc)
+        artifact_id = ""
+    else:
+        artifact = ExportArtifact(
+            tenant_id=user.tenant_id, owner_id=user.user_id, order_id=order_id,
+            fmt=fmt, filename=filename, storage_key=key, size=len(data),
+            sha256=sha256_hex(data),
+        )
+        db.add(artifact)
+        # 主键是 Python 侧 default=uuid：不 flush 就还是 None，响应头会拿不到 id
+        await db.flush()
+        artifact_id = artifact.id
+
     await db.commit()
-    return Response(
-        content=data,
-        media_type=media,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
-    )
+    headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"}
+    if artifact_id:
+        headers["X-Export-Id"] = artifact_id
+    return Response(content=data, media_type=media, headers=headers)
+
+
+# ── v1.12 #14：导出归档查询 / 签名 URL / 重新下载 ────────────
+
+@router.get("/orders/{order_id}/exports")
+async def list_exports(order_id: str, db: AsyncSession = Depends(get_db),
+                       user: CurrentUser = Depends(current_user)):
+    await _get_owned_order(db, user, order_id)
+    rows = (await db.execute(
+        select(ExportArtifact).where(ExportArtifact.order_id == order_id)
+        .order_by(ExportArtifact.created_at.desc(), ExportArtifact.id.desc())
+    )).scalars().all()
+    return {"exports": [{"id": r.id, "fmt": r.fmt, "size": r.size,
+                         "sha256": r.sha256,
+                         "filename": r.filename,
+                         "created_at": r.created_at.isoformat() if r.created_at else None}
+                        for r in rows]}
+
+
+async def _get_owned_artifact(db: AsyncSession, user: CurrentUser,
+                              export_id: str) -> ExportArtifact:
+    row = await db.get(ExportArtifact, export_id)
+    if row is None or row.owner_id != user.user_id:
+        raise HTTPException(404, "导出记录不存在")
+    return row
+
+
+@router.get("/exports/{export_id}/signed-url")
+async def export_signed_url(export_id: str, expires_in: int = Query(default=3600, ge=60, le=86400),
+                            db: AsyncSession = Depends(get_db),
+                            user: CurrentUser = Depends(current_user)):
+    art = await _get_owned_artifact(db, user, export_id)
+    from ..storage import get_storage
+
+    try:
+        url = get_storage().url(art.storage_key, expires=expires_in)
+    except Exception as exc:
+        raise HTTPException(502, f"生成签名链接失败：{exc}") from None
+    return {"url": url, "expires_in": expires_in, "filename": art.filename,
+            "fmt": art.fmt, "size": art.size, "sha256": art.sha256}
+
+
+@router.get("/exports/{export_id}/download")
+async def export_download(export_id: str, db: AsyncSession = Depends(get_db),
+                          user: CurrentUser = Depends(current_user)):
+    art = await _get_owned_artifact(db, user, export_id)
+    from ..storage import get_storage
+
+    try:
+        data = get_storage().read(art.storage_key)
+    except Exception as exc:
+        raise HTTPException(404, f"归档文件已不存在：{exc}") from None
+    import mimetypes
+
+    media = mimetypes.guess_type(art.filename)[0] or "application/octet-stream"
+    return Response(content=data, media_type=media, headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{art.filename}"})

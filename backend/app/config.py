@@ -92,6 +92,8 @@ class Settings(BaseSettings):
 
     # 可观测性（v1.8）：一行一个 JSON 的日志（便于 Loki/ELK 采集）
     log_json: bool = False
+    # 离线模式（v1.12 #21）：检索/核查都不出网，只查本地文献库
+    offline_mode: bool = False
 
     # 对象存储（v1.9）：local 默认（clone 即跑）；s3 需装 boto3 并配 SC_S3_*
     storage_backend: str = "local"          # local | s3

@@ -149,16 +149,45 @@ VERIFY_STATES = ("verified", "suspicious", "fake")
 _TITLE_MATCH = 0.85   # ≥0.85 → verified
 _TITLE_SUSPECT = 0.55  # 0.55~0.85 → suspicious；<0.55 → fake
 
+DEFAULT_TOP_K = 5
+
+
+def _rank_candidates(title: str, cands: list[dict], top_k: int) -> list[dict]:
+    """把各源返回的候选统一打分、排序、截断。
+
+    统一形状：{title, year, venue, doi, source, similarity}。
+    相似度用与判定同一把尺子（_similarity），保证「候选列表里的最高分」
+    就是判定用的那个分——否则用户看到的证据和结论对不上。
+    """
+    scored = []
+    for cand in cands:
+        if not cand.get("title"):
+            continue
+        scored.append({
+            "title": cand.get("title"),
+            "year": cand.get("year"),
+            "venue": cand.get("venue"),
+            "doi": cand.get("doi"),
+            "source": cand.get("source", "crossref"),
+            "similarity": round(_similarity(title, cand["title"]), 3),
+        })
+    scored.sort(key=lambda c: c["similarity"], reverse=True)
+    return scored[:max(1, top_k)]
+
 
 async def verify_citation(title: str, doi: str | None = None,
-                          year: int | None = None) -> dict:
-    """单条引用核查。返回 {"state": ..., "similarity": ..., "evidence": {...}}。
+                          year: int | None = None,
+                          top_k: int = DEFAULT_TOP_K) -> dict:
+    """单条引用核查。返回 {"state":..., "similarity":..., "candidates":[...], "evidence":{...}}。
 
     判定顺序：有 DOI 先查 DOI（命中即 verified，可附年份不一致降级 suspicious）；
     无 DOI 或 DOI 查无 → 标题模糊匹配，Crossref → Semantic Scholar → PubMed 逐源补查，
     任一本源达到 verified 阈值即停（多源是为了「这个查不到还有别的」，不是混排打分）。
+
+    candidates 是证据链本体：按相似度降序的 Top-N 候选（含年份/期刊/DOI/来源），
+    让人能自己判断「到底像哪一篇」，而不是只拿到一个 0.905 的黑箱分数。
     """
-    key = f"{_norm(title)}|{doi or ''}|{year or ''}"
+    key = f"{_norm(title)}|{doi or ''}|{year or ''}|{top_k}"
     cached = _cache_get(key)
     if cached is not None:
         return dict(cached)
@@ -176,6 +205,11 @@ async def verify_citation(title: str, doi: str | None = None,
             result = {
                 "state": state,
                 "similarity": 1.0,
+                "candidates": [{
+                    "title": meta.get("title"), "year": meta.get("year"),
+                    "venue": meta.get("venue"), "doi": meta.get("doi"),
+                    "source": "crossref", "similarity": 1.0,
+                }],
                 "evidence": _evidence("doi-lookup", matched_title=meta["title"],
                                       matched_year=meta.get("year"), venue=meta.get("venue"),
                                       year_mismatch=None if year_ok else year),
@@ -217,20 +251,23 @@ async def verify_citation(title: str, doi: str | None = None,
             errors.append(f"{src_name}: {exc}")
             log.warning("citecheck %s failed: %s", src_name, exc)
 
+    ranked = _rank_candidates(title, candidates, top_k)
     if best is None:
         if errors:
             raise RuntimeError("核查源不可用：" + "; ".join(errors)) from None
-        result = {"state": "fake", "similarity": 0.0,
+        result = {"state": "fake", "similarity": 0.0, "candidates": ranked,
                   "evidence": _evidence("title-match", matched_title=None,
                                         candidates_checked=len(candidates))}
     else:
         src = best.get("source", "crossref")
         if best_sim < _TITLE_SUSPECT:
             result = {"state": "fake", "similarity": round(best_sim, 3),
+                      "candidates": ranked,
                       "evidence": _evidence("title-match", source=src, matched_title=None,
                                             candidates_checked=len(candidates))}
         elif best_sim < _TITLE_MATCH:
             result = {"state": "suspicious", "similarity": round(best_sim, 3),
+                      "candidates": ranked,
                       "evidence": _evidence("title-match", source=src, matched_title=best["title"],
                                             matched_year=best.get("year"), venue=best.get("venue"),
                                             matched_doi=best.get("doi"))}
@@ -238,6 +275,7 @@ async def verify_citation(title: str, doi: str | None = None,
             year_ok = (year is None or best.get("year") == year)
             state = "verified" if year_ok else "suspicious"
             result = {"state": state, "similarity": round(best_sim, 3),
+                      "candidates": ranked,
                       "evidence": _evidence("title-match", source=src, matched_title=best["title"],
                                             matched_year=best.get("year"), venue=best.get("venue"),
                                             matched_doi=best.get("doi"),

@@ -6,7 +6,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Index, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, JSON, String, Text
 
 from .db import Base
 
@@ -243,6 +243,91 @@ class TenantConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class UsageRecord(Base):
+    """token 级用量记录（v1.12 #18）：每次 LLM 调用落一条，append-only。
+
+    cost_cents 按 llm.router.COST_TABLE 折算（元→分四舍五入），fake-model 为 0。
+    """
+
+    __tablename__ = "usage_records"
+    __table_args__ = (
+        Index("ix_usage_records_owner_created", "owner_id", "created_at"),
+        Index("ix_usage_records_order_id", "order_id"),
+    )
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    order_id = Column(String(32))
+    job_id = Column(String(32))
+    kind = Column(String(32), nullable=False)  # outline/chapter/rewrite/abstract/ppt/diagram
+    model = Column(String(128), nullable=False, default="")
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    cost_cents = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class Account(Base):
+    """用户余额/套餐账户（v1.12 #18）。
+
+    tokens_used 是当期累计用量，period_start 起算；订阅不重置用量，
+    只把 token_quota 换成新套餐的额度（避免反复订阅刷额度——订阅要花钱）。
+    """
+
+    __tablename__ = "accounts"
+    __table_args__ = (
+        Index("ix_accounts_tenant_owner", "tenant_id", "owner_id"),
+    )
+
+    owner_id = Column(String(32), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    plan_key = Column(String(32), nullable=False, default="free")
+    balance_cents = Column(Integer, nullable=False, default=0)
+    token_quota = Column(Integer, nullable=False, default=0)
+    tokens_used = Column(Integer, nullable=False, default=0)
+    period_start = Column(DateTime(timezone=True), default=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class AccountLedger(Base):
+    """账户流水（append-only）：topup / subscribe / redeem / refund。"""
+
+    __tablename__ = "account_ledger"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    kind = Column(String(32), nullable=False)
+    delta_cents = Column(Integer, nullable=False)
+    balance_after = Column(Integer, nullable=False)
+    reason = Column(String(255), nullable=False, default="")
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class FormatTemplate(Base):
+    """租户自建格式模板（v1.12 #10）。内置模板在代码里，这里只存用户建的。
+
+    spec_json 存完整规格（body/heading1-3/page），由 export.templates.validate_spec 校验后落库。
+    key 在租户内唯一——同一租户不能有两条同名模板，否则导出解析会有歧义。
+    """
+
+    __tablename__ = "format_templates"
+    __table_args__ = (
+        Index("ix_format_templates_tenant_key", "tenant_id", "key", unique=True),
+    )
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    key = Column(String(64), nullable=False)
+    name = Column(String(128), nullable=False)
+    school = Column(String(128), nullable=False, default="")
+    degree = Column(String(32), nullable=False, default="")
+    spec_json = Column(JSON, nullable=False)
+    builtin = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
 class Distributor(Base):
     """分销代理：校园代理/渠道商，佣金按 rate_bps 计（万分比，默认 5%）。"""
 
@@ -345,4 +430,124 @@ class UploadedFile(Base):
     size = Column(Integer, nullable=False, default=0)
     storage_key = Column(String(255), nullable=False)
     sha256 = Column(String(64), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class GenerationProvenance(Base):
+    """内容指纹链（append-only）：AI 参与度 A/B/C 的可审计凭据。
+
+    每次生成/改写记一行：内容 sha256（空白不敏感）+ 当时声明的 ai_level +
+    与上一版的相似度（sim_to_prev）。链只追加不改写——与 quota_ledger 同纪律。
+    """
+
+    __tablename__ = "generation_provenance"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    order_id = Column(String(32), nullable=False, index=True)
+    node_id = Column(String(32), nullable=False, index=True)
+    kind = Column(String(16), nullable=False)  # generate / rewrite / edit
+    content_sha256 = Column(String(64), nullable=False, index=True)
+    word_count = Column(Integer, nullable=False, default=0)
+    ai_level = Column(String(1), nullable=False)
+    sim_to_prev = Column(Float)  # 与上一版的相似度（0~1），第一版为空
+    job_id = Column(String(32), index=True)
+    actor = Column(String(64))  # 谁做的（user id / "system"）
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        Index("ix_prov_order_node", "order_id", "node_id"),
+    )
+
+
+class RedeemCode(Base):
+    """兑换码（v1.12 #17）：一码一用，兑换成账户余额。
+
+    code 直接做主键——兑换时按 code 点查，避免扫描；used_by 为空表示未用。
+    """
+
+    __tablename__ = "redeem_codes"
+
+    code = Column(String(32), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    batch = Column(String(64), nullable=False, default="", index=True)
+    amount_cents = Column(Integer, nullable=False)
+    used_by = Column(String(32), index=True)
+    used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class GroupBuy(Base):
+    """拼团（v1.12 #17）：凑满 required 人按 group_price_cents 结算。"""
+
+    __tablename__ = "group_buys"
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    plan_key = Column(String(32), nullable=False)
+    required = Column(Integer, nullable=False, default=3)
+    joined = Column(Integer, nullable=False, default=0)
+    group_price_cents = Column(Integer, nullable=False)
+    initiator_id = Column(String(32), nullable=False, index=True)
+    status = Column(String(16), nullable=False, default="open")  # open/settled/expired
+    expires_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class GroupBuyMember(Base):
+    """拼团成员（一人一单，重复参团在业务层挡 409）。"""
+
+    __tablename__ = "group_buy_members"
+    __table_args__ = (
+        Index("ix_group_buy_members_gb_owner", "group_buy_id", "owner_id", unique=True),
+    )
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    group_buy_id = Column(String(32), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class LocalReference(Base):
+    """本地文献库条目（v1.12 #21）：离线模式下的检索/核查数据源。
+
+    按 (owner_id, title, year) 去重——同一用户重复导入同一个 BibTeX 不应产生重复条目。
+    """
+
+    __tablename__ = "local_references"
+    __table_args__ = (
+        Index("ix_local_refs_owner_title", "owner_id", "title"),
+    )
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    title = Column(String(512), nullable=False)
+    authors_json = Column(JSON, default=list)
+    year = Column(Integer)
+    venue = Column(String(255), nullable=False, default="")
+    doi = Column(String(255))
+    abstract = Column(Text, nullable=False, default="")
+    kind = Column(String(16), nullable=False, default="journal")
+    created_at = Column(DateTime(timezone=True), default=_now)
+
+
+class ExportArtifact(Base):
+    """导出产物归档（v1.12 #14）：每次导出落一份，可换签名 URL 再取。"""
+
+    __tablename__ = "export_artifacts"
+    __table_args__ = (
+        Index("ix_export_artifacts_order_created", "order_id", "created_at"),
+    )
+
+    id = Column(String(32), primary_key=True, default=_uuid)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    owner_id = Column(String(32), nullable=False, index=True)
+    order_id = Column(String(32), nullable=False)
+    fmt = Column(String(16), nullable=False)
+    filename = Column(String(255), nullable=False)
+    storage_key = Column(String(512), nullable=False)
+    size = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String(64), nullable=False, default="")
     created_at = Column(DateTime(timezone=True), default=_now)

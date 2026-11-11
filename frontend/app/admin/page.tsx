@@ -8,6 +8,10 @@ type UserRow = { id: string; tenant_id: string; phone: string; created_at: strin
 type OrderRow = { id: string; tenant_id: string; owner_id: string; title: string; education: string; status: string; price_cents: number; paid_at: string | null; created_at: string | null };
 type AuditRow = { id: string; admin_id: string; action: string; target: any; detail: any; created_at: string | null };
 type Report = { window_days: number; revenue_cents: number; orders_new: number; new_users: number; tokens_in: number; tokens_out: number };
+type TenantRow = { id: string; name: string; domain: string; plan: string; status: string; balance_cents: number; created_at: string | null };
+type DistributorRow = { id: string; name: string; phone: string; code: string; rate_bps: number; balance_cents: number; status: string; created_at: string | null };
+type CommissionRow = { id: string; distributor_id: string; order_id: string; amount_cents: number; status: string; created_at: string | null };
+type TransferRow = { id: string; distributor_id: string; amount_cents: number; status: string; note: string; created_at: string | null; paid_at: string | null };
 
 export default function Admin() {
   const [username, setUsername] = useState("admin");
@@ -18,19 +22,28 @@ export default function Admin() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [report, setReport] = useState<Report | null>(null);
+  const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [distributors, setDistributors] = useState<DistributorRow[]>([]);
+  const [commissions, setCommissions] = useState<CommissionRow[]>([]);
+  const [transfers, setTransfers] = useState<TransferRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const [s, u, o, a, rp] = await Promise.all([
+      const [s, u, o, a, rp, tn, ds, cm, tf] = await Promise.all([
         api<Stats>("/admin/stats", { admin: true }),
         api<UserRow[]>("/admin/users", { admin: true }),
         api<OrderRow[]>("/admin/orders", { admin: true }),
         api<AuditRow[]>("/admin/audit-log", { admin: true }),
         api<Report>("/admin/reports/summary?days=7", { admin: true }),
+        api<TenantRow[]>("/admin/tenants", { admin: true }),
+        api<DistributorRow[]>("/admin/distributors", { admin: true }),
+        api<CommissionRow[]>("/admin/commissions", { admin: true }),
+        api<TransferRow[]>("/admin/distributor-transfers", { admin: true }),
       ]);
       setStats(s); setUsers(u); setOrders(o); setAudit(a); setReport(rp);
+      setTenants(tn); setDistributors(ds); setCommissions(cm); setTransfers(tf);
     } catch (err: any) { setMsg(`加载失败：${err.message}`); }
   }, []);
 
@@ -57,6 +70,51 @@ export default function Admin() {
       setMsg(`已为 ${userId} 调整配额 ${delta}`);
       await reload();
     } catch (err: any) { setMsg(`调整失败：${err.message}`); }
+  }
+
+  async function createTenant() {
+    const name = window.prompt("租户名称（2 字以上）");
+    if (!name) return;
+    const domain = window.prompt("绑定域名（可空）", "") || "";
+    try {
+      await api("/admin/tenants", { method: "POST", admin: true, body: { name, domain } });
+      setMsg(`已创建租户 ${name}`);
+      await reload();
+    } catch (err: any) { setMsg(`创建租户失败：${err.message}`); }
+  }
+
+  async function createDistributor() {
+    const name = window.prompt("分销商名称");
+    if (!name) return;
+    const phone = window.prompt("联系电话", "13800000000") || "";
+    const code = window.prompt("推广码（2~32 字，唯一）");
+    if (!code) return;
+    const rateRaw = window.prompt("佣金比例（万分比，500 = 5%）", "500") || "500";
+    try {
+      await api("/admin/distributors", { method: "POST", admin: true,
+        body: { name, phone, code, rate_bps: Number(rateRaw), tenant_id: "primary" } });
+      setMsg(`已创建分销商 ${name}（推广码 ${code}）`);
+      await reload();
+    } catch (err: any) { setMsg(`创建分销商失败：${err.message}`); }
+  }
+
+  async function settleCommission(id: string) {
+    if (!window.confirm("确认结算该笔佣金？（结算后不可撤销）")) return;
+    try {
+      await api(`/admin/commissions/${id}/settle`, { method: "POST", admin: true });
+      setMsg(`佣金 ${id} 已结算`);
+      await reload();
+    } catch (err: any) { setMsg(`结算失败：${err.message}`); }
+  }
+
+  async function auditTransfer(id: string, action: "approve" | "reject") {
+    const label = action === "approve" ? "通过" : "驳回";
+    if (!window.confirm(`确认${label}提现申请 ${id}？`)) return;
+    try {
+      await api(`/admin/distributor-transfers/${id}/${action}`, { method: "POST", admin: true });
+      setMsg(`提现 ${id} 已${label}`);
+      await reload();
+    } catch (err: any) { setMsg(`${label}失败：${err.message}`); }
   }
 
   if (!role) {
@@ -125,6 +183,103 @@ export default function Admin() {
                 <td className="p-2">{o.status}</td>
                 <td className="p-2">{(o.price_cents / 100).toFixed(2)}</td>
                 <td className="p-2">{o.paid_at ? "已支付" : "未支付"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">租户</h2>
+          <button className="border rounded px-3 py-1 text-xs" onClick={createTenant}>新建租户</button>
+        </div>
+        <table className="w-full text-xs border">
+          <thead className="bg-neutral-50"><tr><th className="p-2 text-left">ID</th><th className="p-2 text-left">名称</th><th className="p-2 text-left">域名</th><th className="p-2 text-left">套餐</th><th className="p-2 text-left">状态</th><th className="p-2 text-left">余额(元)</th></tr></thead>
+          <tbody>
+            {tenants.length === 0 && <tr><td className="p-2 text-neutral-400" colSpan={6}>暂无租户</td></tr>}
+            {tenants.map((t) => (
+              <tr key={t.id} className="border-t">
+                <td className="p-2 font-mono">{t.id}</td>
+                <td className="p-2">{t.name}</td>
+                <td className="p-2">{t.domain || "—"}</td>
+                <td className="p-2">{t.plan}</td>
+                <td className="p-2">{t.status}</td>
+                <td className="p-2">{(t.balance_cents / 100).toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">分销商</h2>
+          <button className="border rounded px-3 py-1 text-xs" onClick={createDistributor}>新建分销商</button>
+        </div>
+        <table className="w-full text-xs border">
+          <thead className="bg-neutral-50"><tr><th className="p-2 text-left">名称</th><th className="p-2 text-left">推广码</th><th className="p-2 text-left">电话</th><th className="p-2 text-left">佣金率</th><th className="p-2 text-left">余额(元)</th><th className="p-2 text-left">状态</th></tr></thead>
+          <tbody>
+            {distributors.length === 0 && <tr><td className="p-2 text-neutral-400" colSpan={6}>暂无分销商</td></tr>}
+            {distributors.map((d) => (
+              <tr key={d.id} className="border-t">
+                <td className="p-2">{d.name}</td>
+                <td className="p-2 font-mono">{d.code}</td>
+                <td className="p-2">{d.phone}</td>
+                <td className="p-2">{(d.rate_bps / 100).toFixed(2)}%</td>
+                <td className="p-2">{(d.balance_cents / 100).toFixed(2)}</td>
+                <td className="p-2">{d.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-medium">佣金</h2>
+        <table className="w-full text-xs border">
+          <thead className="bg-neutral-50"><tr><th className="p-2 text-left">ID</th><th className="p-2 text-left">分销商</th><th className="p-2 text-left">订单</th><th className="p-2 text-left">金额(元)</th><th className="p-2 text-left">状态</th><th className="p-2">操作</th></tr></thead>
+          <tbody>
+            {commissions.length === 0 && <tr><td className="p-2 text-neutral-400" colSpan={6}>暂无佣金记录</td></tr>}
+            {commissions.map((c) => (
+              <tr key={c.id} className="border-t">
+                <td className="p-2 font-mono">{c.id}</td>
+                <td className="p-2 font-mono">{c.distributor_id}</td>
+                <td className="p-2 font-mono">{c.order_id}</td>
+                <td className="p-2">{(c.amount_cents / 100).toFixed(2)}</td>
+                <td className="p-2">{c.status}</td>
+                <td className="p-2 text-center">
+                  {c.status === "pending"
+                    ? <button className="border rounded px-2 py-0.5" onClick={() => settleCommission(c.id)}>结算</button>
+                    : <span className="text-neutral-400">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-medium">提现审核</h2>
+        <table className="w-full text-xs border">
+          <thead className="bg-neutral-50"><tr><th className="p-2 text-left">ID</th><th className="p-2 text-left">分销商</th><th className="p-2 text-left">金额(元)</th><th className="p-2 text-left">状态</th><th className="p-2 text-left">备注</th><th className="p-2">操作</th></tr></thead>
+          <tbody>
+            {transfers.length === 0 && <tr><td className="p-2 text-neutral-400" colSpan={6}>暂无提现申请</td></tr>}
+            {transfers.map((t) => (
+              <tr key={t.id} className="border-t">
+                <td className="p-2 font-mono">{t.id}</td>
+                <td className="p-2 font-mono">{t.distributor_id}</td>
+                <td className="p-2">{(t.amount_cents / 100).toFixed(2)}</td>
+                <td className="p-2">{t.status}</td>
+                <td className="p-2">{t.note || "—"}</td>
+                <td className="p-2 text-center space-x-1">
+                  {t.status === "pending" ? (
+                    <>
+                      <button className="border rounded px-2 py-0.5" onClick={() => auditTransfer(t.id, "approve")}>通过</button>
+                      <button className="border rounded px-2 py-0.5" onClick={() => auditTransfer(t.id, "reject")}>驳回</button>
+                    </>
+                  ) : <span className="text-neutral-400">—</span>}
+                </td>
               </tr>
             ))}
           </tbody>

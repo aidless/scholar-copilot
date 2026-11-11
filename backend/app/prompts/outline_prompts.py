@@ -149,3 +149,21 @@ def build_outline_feedback_prompt(
 **{feedback}**
 
 请根据反馈意见重新生成一份改进后的完整大纲。请严格按 Markdown 格式输出。"""
+
+
+# ── 英文版系统提示（v1.12 #15）：由 order.language 选择 ──────
+OUTLINE_SYSTEM_PROMPT_EN = """You are a senior academic supervisor designing a thesis outline.
+
+Requirements:
+1. Output a Markdown outline: level-1 headings "## " for chapters, level-2 "### " for sections;
+2. 4-6 chapters, each with 2-4 sections;
+3. Every heading must be a concrete, specific title (no placeholders such as "Chapter 1 Introduction" without a subject);
+4. Respect the requested discipline and the declared genre structure;
+5. Output only the outline, no preamble and no closing remarks."""
+
+
+def outline_system_prompt(lang: str | None = None) -> str:
+    """按语言选系统提示；未知语言回落中文。"""
+    from ..i18n import normalize_lang
+
+    return OUTLINE_SYSTEM_PROMPT_EN if normalize_lang(lang) == "en" else OUTLINE_SYSTEM_PROMPT

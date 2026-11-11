@@ -20,6 +20,11 @@ def _engine_and_session():
     return engine, async_sessionmaker(engine, expire_on_commit=False)
 
 
+def get_session_factory():
+    """拿到会话工厂（脚本/后台任务/测试里需要自开会话时用）。"""
+    return _engine_and_session()[1]
+
+
 async def get_db():
     _, SessionLocal = _engine_and_session()
     async with SessionLocal() as session:

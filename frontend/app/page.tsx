@@ -2,10 +2,12 @@
 // 首页：定位说明 + 登录/注册（短信验证码开发模式下用 000000）
 import { useEffect, useState } from "react";
 import { api, tokenStore } from "../lib/api";
+import { useT } from "../lib/i18n";
 
 type Mode = "login" | "register";
 
 export default function Home() {
+  const { lang, setLang, t } = useT();
   const [mode, setMode] = useState<Mode>("login");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -130,11 +132,21 @@ export default function Home() {
       )}
 
       <section className="grid grid-cols-2 gap-4 text-sm">
-        <a href="/workbench" className="border rounded-lg p-4 hover:bg-neutral-50">→ 写作台（下单/大纲/逐章/改稿/支付/导出）</a>
-        <a href="/references" className="border rounded-lg p-4 hover:bg-neutral-50">→ 文献检索与溯源核查</a>
-        <a href="/review" className="border rounded-lg p-4 hover:bg-neutral-50">→ AI 味体检（启发式）</a>
-        <a href="/admin" className="border rounded-lg p-4 hover:bg-neutral-50">→ 管理台（RBAC/配额/审计）</a>
+        <a href="/workbench" className="border rounded-lg p-4 hover:bg-neutral-50">→ {t("nav.workbench")}</a>
+        <a href="/references" className="border rounded-lg p-4 hover:bg-neutral-50">→ {t("nav.references")}</a>
+        <a href="/review" className="border rounded-lg p-4 hover:bg-neutral-50">→ {t("nav.review")}</a>
+        <a href="/admin" className="border rounded-lg p-4 hover:bg-neutral-50">→ {t("nav.admin")}</a>
       </section>
+
+      <div className="flex items-center gap-2 text-xs text-neutral-500">
+        <span>{t("common.lang")}</span>
+        {(["zh", "en"] as const).map((code) => (
+          <button key={code} onClick={() => setLang(code)}
+            className={`px-2 py-0.5 rounded border ${lang === code ? "bg-neutral-900 text-white" : ""}`}>
+            {code === "zh" ? "中文" : "English"}
+          </button>
+        ))}
+      </div>
     </main>
   );
 }

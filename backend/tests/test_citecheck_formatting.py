@@ -140,7 +140,8 @@ def test_format_profiles_listing():
         r = client.get("/formatting/profiles")
         assert r.status_code == 200
         profiles = {p["key"] for p in r.json()}
-        assert profiles == {"本科-通用", "硕士-通用", "博士-通用", "英文-通用"}
+        # v1.12 #10 起还有 4 套学校模板（示例），所以断言「原四条必须都在」
+        assert {"本科-通用", "硕士-通用", "博士-通用", "英文-通用"} <= profiles
         sample = r.json()[0]
         assert sample["body"]["size_pt"] == 12
         assert sample["headings"]["heading1"]["size_pt"] >= 14

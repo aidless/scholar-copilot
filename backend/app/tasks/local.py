@@ -16,15 +16,18 @@ from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, Wri
 from ..prompts.chapter_prompts import (
     CHAPTER_SYSTEM_PROMPT,
     build_chapter_user_prompt,
+    chapter_system_prompt,
 )
 from ..prompts.outline_prompts import (
     OUTLINE_FEEDBACK_SYSTEM_PROMPT,
     OUTLINE_SYSTEM_PROMPT,
     build_outline_feedback_prompt,
     build_outline_user_prompt,
+    outline_system_prompt,
 )
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt
 from ..prompts.safety import wrap_untrusted
+from ..provenance import record_event
 from ..writing import genres
 from ..writing.outline_parser import get_chapters, parse_outline_markdown
 from ..writing.service import count_words
@@ -69,6 +72,19 @@ async def run_job(job_id: str) -> None:
                 _m.observe_tokens(job.kind, job.tokens_in, job.tokens_out)
             except Exception:  # noqa: BLE001
                 pass
+            # 计费：token 级用量落库（#18）。记账失败不能回滚已生成的内容
+            try:
+                from ..billing import record_usage
+                order = await db.get(WritingOrder, job.order_id)
+                if order is not None:
+                    await record_usage(db, tenant_id=order.tenant_id,
+                                       owner_id=order.owner_id, kind=job.kind,
+                                       model=job.model or "", tokens_in=job.tokens_in,
+                                       tokens_out=job.tokens_out, order_id=order.id,
+                                       job_id=job.id)
+                    await db.commit()
+            except Exception:  # noqa: BLE001
+                log.warning("记用量失败 job=%s", job_id, exc_info=True)
         except Exception as exc:  # noqa: BLE001——任务失败必须落库而非炸进程
             log.exception("job %s failed", job_id)
             await db.rollback()
@@ -112,7 +128,8 @@ async def _run_outline(db, job: GenerationJob) -> None:
         system = OUTLINE_FEEDBACK_SYSTEM_PROMPT
         user_prompt = build_outline_feedback_prompt(prev.content_md, wrap_untrusted(feedback, "用户反馈"))
     else:
-        system = OUTLINE_SYSTEM_PROMPT
+        # v1.12 #15：按订单语言选系统提示（中文/英文），未知语言回落中文
+        system = outline_system_prompt(getattr(order, "language", None))
         _wt = getattr(order, "writing_type", "thesis") or "thesis"
         user_prompt = build_outline_user_prompt(
             topic=order.title, keywords=[], discipline=order.education,
@@ -155,6 +172,12 @@ async def _run_outline(db, job: GenerationJob) -> None:
     job.tokens_in = result.prompt_tokens
     job.tokens_out = result.completion_tokens
     job.model = result.model
+    await db.commit()
+
+    # #19 指纹链：记一条 outline 事件（内容指纹 + 声明层级 A/B/C）
+    await record_event(db, tenant_id=order.tenant_id, order_id=order.id,
+                       node_id="outline", kind="outline", content=result.text,
+                       ai_level="A", job_id=job.id, actor="system")
     await db.commit()
 
 
@@ -206,7 +229,9 @@ async def _run_chapter(db, job: GenerationJob) -> None:
 
     job.progress = 30
     await db.commit()
-    result = await complete_for("chapter", user_prompt, system=CHAPTER_SYSTEM_PROMPT, max_tokens=8192)
+    result = await complete_for("chapter", user_prompt,
+                                system=chapter_system_prompt(getattr(order, "language", None)),
+                                max_tokens=8192)
 
     chapter.content_md = result.text
     chapter.word_count = count_words(result.text)
@@ -225,6 +250,12 @@ async def _run_chapter(db, job: GenerationJob) -> None:
     job.model = result.model
     await db.commit()
 
+    # #19 指纹链：记一条 generate 事件（AI 初稿 = 层级 A）
+    await record_event(db, tenant_id=order.tenant_id, order_id=order.id,
+                       node_id=chapter.node_id, kind="generate", content=result.text,
+                       ai_level="A", job_id=job.id, actor="system")
+    await db.commit()
+
 
 async def _run_rewrite(db, job: GenerationJob) -> None:
     """章节降重/改写：语义=AI 改写后仍是 AI 产出，披露层级如实更新。
@@ -241,6 +272,7 @@ async def _run_rewrite(db, job: GenerationJob) -> None:
         raise ValueError("该章节还没有内容，无法改写")
 
     prev_level = chapter.ai_level
+    prev_content = chapter.content_md  # #19 指纹链：留一份原稿用于算相似度
     instruction = (job.result_json or {}).get("instruction", "")
     job.progress = 30
     await db.commit()
@@ -261,4 +293,12 @@ async def _run_rewrite(db, job: GenerationJob) -> None:
     job.tokens_in = result.prompt_tokens
     job.tokens_out = result.completion_tokens
     job.model = result.model
+    await db.commit()
+
+    # #19 指纹链：改写也算一次产出，记 rewrite 事件并给出与原稿的相似度
+    order = await db.get(WritingOrder, job.order_id)
+    await record_event(db, tenant_id=order.tenant_id if order else job.tenant_id,
+                       order_id=job.order_id, node_id=chapter.node_id,
+                       kind="rewrite", content=result.text, ai_level=chapter.ai_level,
+                       prev_content=prev_content, job_id=job.id, actor="system")
     await db.commit()
