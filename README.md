@@ -149,3 +149,30 @@ python scripts/seed_demo.py --base http://localhost:8000   # 账号见脚本内 
 ## License
 
 MIT
+
+## 验收题库与复算
+
+`eval/cases.jsonl` 是 20 条可执行验收题，覆盖九个口径：文本自查（CJK 二元组切词/余弦/
+重合判定）、问卷统计（样本标准差/Pearson/输入校验）、论文体检（引用标记/越界裁决）、
+引用格式（GB/T 7714 的「等」/APA 作者连接/未知样式 KeyError）、离线文献库（嵌套花括号
+BibTeX/词序无关检索/年份不符判 suspicious）、大纲树（node_id 编号/无章标题报错）、
+模型成本表、内容指纹的空白不敏感性，以及 OpenAPI 契约与 CI 契约门。18 条是 `expr` /
+`raises`，期望值不是抄文档，而是**调用 `backend.app` 的真实函数现算**；另 2 条 `doc`
+直接对 `openapi.yaml` 与 CI workflow 的正则做断言。
+
+```bash
+python3 eval/run_cases.py            # 20/20 cases passed
+python3 eval/run_cases.py --save     # 顺带把结果写进 eval/run-report.json
+python3 eval/run_cases.py --selftest # 篡改一条期望值，必须变红（证明这套题会失败）
+```
+
+**数字如何复算**：`eval/run-report.json` 里每条 case 都带 `id` / `axis` / `detail`，
+把 `detail` 与 `cases.jsonl` 的 `verify` 代码一起看，就能从源码复现该数字；
+`--save` 重跑一次即可重建整份报告，不需要手工抄数。
+
+**失败归因**：`run_cases.py` 不只报通过率，失败时按 `axis` 汇总（例如
+`offline/本地核查: 1 条 —— OFF-03`），直接指出是哪个模块的哪个口径坏了。
+
+## 本机可重跑性
+
+`make eval` 跑 `backend/tests` 的离线契约子集（认证/计费/导出/溯源/加固/离线库/自检/LaTeX，约 52s，实测 60 passed、rc=0）；`make ci-eval` 是 CI 原命令的全量套件，本机约 4.5 分钟且有一条真失败 `tests/test_openapi_sync.py::test_export_script_regenerates_same_content`（openapi.yaml 与 `python3 -m scripts.export_openapi` 现导出结果不一致，属仓内 drift，未在本次入口修复中改动源码或产物）。

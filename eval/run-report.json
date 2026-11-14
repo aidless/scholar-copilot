@@ -1,0 +1,129 @@
+{
+ "total": 20,
+ "passed": 20,
+ "failed": 0,
+ "selftest": false,
+ "failed_by_axis": {},
+ "results": [
+  {
+   "id": "SIM-01",
+   "axis": "similarity/余弦",
+   "ok": true,
+   "detail": "0.9999999999999998"
+  },
+  {
+   "id": "SIM-02",
+   "axis": "similarity/切词",
+   "ok": true,
+   "detail": "3"
+  },
+  {
+   "id": "SIM-03",
+   "axis": "similarity/自查",
+   "ok": true,
+   "detail": "low_overlap"
+  },
+  {
+   "id": "ANA-01",
+   "axis": "analysis/描述统计",
+   "ok": true,
+   "detail": "1.290994"
+  },
+  {
+   "id": "ANA-02",
+   "axis": "analysis/相关",
+   "ok": true,
+   "detail": "1.0"
+  },
+  {
+   "id": "ANA-03",
+   "axis": "analysis/输入校验",
+   "ok": true,
+   "detail": "raised ValueError"
+  },
+  {
+   "id": "AUD-01",
+   "axis": "audit/引用标记",
+   "ok": true,
+   "detail": "3"
+  },
+  {
+   "id": "AUD-02",
+   "axis": "audit/规则裁决",
+   "ok": true,
+   "detail": "fail"
+  },
+  {
+   "id": "CIT-01",
+   "axis": "citation/GB7714",
+   "ok": true,
+   "detail": "[1] 张三, 李四, 王五, 等. 测试文献[J], 2024. DOI: 10.1/x."
+  },
+  {
+   "id": "CIT-02",
+   "axis": "citation/APA",
+   "ok": true,
+   "detail": "Smith, J., & Doe, A. (2020). Deep Learning."
+  },
+  {
+   "id": "CIT-03",
+   "axis": "citation/样式表",
+   "ok": true,
+   "detail": "raised KeyError"
+  },
+  {
+   "id": "OFF-01",
+   "axis": "offline/BibTeX",
+   "ok": true,
+   "detail": "Deep GPU Systems"
+  },
+  {
+   "id": "OFF-02",
+   "axis": "offline/本地检索",
+   "ok": true,
+   "detail": "Offline First Design"
+  },
+  {
+   "id": "OFF-03",
+   "axis": "offline/本地核查",
+   "ok": true,
+   "detail": "suspicious"
+  },
+  {
+   "id": "OUT-01",
+   "axis": "outline/树解析",
+   "ok": true,
+   "detail": "ch1,ch1_sec1,ch2"
+  },
+  {
+   "id": "OUT-02",
+   "axis": "outline/输入校验",
+   "ok": true,
+   "detail": "raised ValueError"
+  },
+  {
+   "id": "LLM-01",
+   "axis": "llm/成本表",
+   "ok": true,
+   "detail": "0.002"
+  },
+  {
+   "id": "PROV-01",
+   "axis": "provenance/指纹",
+   "ok": true,
+   "detail": "True"
+  },
+  {
+   "id": "DOC-01",
+   "axis": "contract/OpenAPI",
+   "ok": true,
+   "detail": "/review/orders/{order_id}/audit:"
+  },
+  {
+   "id": "DOC-02",
+   "axis": "contract/CI",
+   "ok": true,
+   "detail": "python -m scripts.export_openapi --check"
+  }
+ ]
+}
