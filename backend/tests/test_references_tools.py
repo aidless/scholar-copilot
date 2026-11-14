@@ -1,7 +1,6 @@
 """v0.3：文献检索（monkeypatch 免网络）/ 挂单 / 降重改写（fake provider）/ 检测启发式。"""
 import time
 
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE_A = "13800000011"

@@ -16,7 +16,7 @@ from ..config import settings
 from ..db import get_db
 from ..models import SmsCode, User, WechatScene
 from ..ratelimit import rate_limit_login
-from ..security import hash_password, make_token, verify_password, verify_sms_code
+from ..security import hash_password, make_token, verify_password
 from ..sms import gen_code, hash_code, send_sms_code
 from ..tenancy import CurrentUser, current_user
 from ..writing.service import quota_remaining

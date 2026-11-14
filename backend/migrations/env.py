@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import Base  # noqa: E402
-import app.models  # noqa: F401,E402——注册全部表
 
 target_metadata = Base.metadata
 

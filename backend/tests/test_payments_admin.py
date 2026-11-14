@@ -1,5 +1,4 @@
 """v0.5：支付订单（mock 模式）+ 多租户管理端 RBAC + 审计。"""
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE_A = "13800000011"

@@ -2,7 +2,6 @@
 
 用 fake provider 的确定性大纲（5 章）造数据，断言版本推进与 idx 连续性。
 """
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE = "13800000011"

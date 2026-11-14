@@ -30,7 +30,7 @@ from ..tasks.local import run_job
 from ..tasks.queue import enqueue
 from ..writing import genres
 from ..provenance import chain_for_order, record_event
-from ..writing.outline_parser import get_chapters, parse_outline_markdown
+from ..writing.outline_parser import get_chapters
 from ..writing.service import count_words, price_cents, quota_remaining
 
 log = logging.getLogger(__name__)

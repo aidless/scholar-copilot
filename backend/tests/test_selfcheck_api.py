@@ -1,5 +1,4 @@
 """#8 API 层：自查与 AIGC 特征端点（先 RED 后 GREEN）。"""
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app

@@ -9,7 +9,6 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..db import get_db
 from ..llm.router import complete_for
 from ..ratelimit import rate_limit_llm
 from ..prompts.rewrite_prompts import REWRITE_SYSTEM_PROMPT, build_rewrite_user_prompt

@@ -155,7 +155,7 @@ async def audit_log(db: AsyncSession = Depends(get_db),
 async def create_tenant(body: dict, db: AsyncSession = Depends(get_db),
                         admin: CurrentUser = Depends(admin_user)):
     """新建白标租户（域名唯一）。密钥配置不进 API，由 DBA 直接维护加密列。"""
-    from .tenant import TenantConfigIn, TenantCreateIn
+    from .tenant import TenantCreateIn
 
     data = TenantCreateIn(**body)
     exists = (await db.execute(select(Tenant).where(Tenant.domain == data.domain))).scalars().first()

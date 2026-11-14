@@ -14,13 +14,11 @@ from ..db import _engine_and_session
 from ..llm.router import complete_for
 from ..models import GenerationJob, OrderChapter, OrderOutline, QuotaLedger, WritingOrder
 from ..prompts.chapter_prompts import (
-    CHAPTER_SYSTEM_PROMPT,
     build_chapter_user_prompt,
     chapter_system_prompt,
 )
 from ..prompts.outline_prompts import (
     OUTLINE_FEEDBACK_SYSTEM_PROMPT,
-    OUTLINE_SYSTEM_PROMPT,
     build_outline_feedback_prompt,
     build_outline_user_prompt,
     outline_system_prompt,

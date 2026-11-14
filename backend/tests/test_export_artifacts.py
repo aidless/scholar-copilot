@@ -6,7 +6,6 @@
 import hashlib
 from contextlib import contextmanager
 
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE = "13620000001"

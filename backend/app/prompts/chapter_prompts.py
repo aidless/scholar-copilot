@@ -74,7 +74,7 @@ def build_chapter_user_prompt(
     Returns:
         str: 完整的 User Prompt
     """
-    prompt_parts = [f"请撰写以下论文章节：\n"]
+    prompt_parts = ["请撰写以下论文章节：\n"]
 
     # 论文大纲上下文
     prompt_parts.append("## 论文完整大纲")
@@ -93,14 +93,14 @@ def build_chapter_user_prompt(
     prompt_parts.append("## 需要撰写的章节")
     prompt_parts.append(f"**{chapter_title}**")
     if chapter_description:
-        prompt_parts.append(f"")
+        prompt_parts.append("")
         prompt_parts.append(f"章节描述：{chapter_description}")
-    prompt_parts.append(f"")
+    prompt_parts.append("")
     prompt_parts.append(f"目标字数：约 {target_word_count:,} 字")
 
     # 用户补充数据
     if user_data:
-        prompt_parts.append(f"")
+        prompt_parts.append("")
         prompt_parts.append(f"**用户补充要求**：{user_data}")
 
     prompt_parts.append("")

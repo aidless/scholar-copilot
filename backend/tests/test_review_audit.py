@@ -2,7 +2,6 @@
 
 RED 原则：每条规则都构造「明确违规」的输入并断言被检出。
 """
-import pytest
 from fastapi.testclient import TestClient
 
 from app.audit import audit, citation_markers, extract_numbers

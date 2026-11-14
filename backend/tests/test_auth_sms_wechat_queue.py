@@ -1,5 +1,4 @@
 """v1.2：短信验证码（库内哈希 + 无状态 oracle）、微信扫码登录（dev mock）、任务队列抽象。"""
-import pytest
 from fastapi.testclient import TestClient
 
 PW = "Test123456"

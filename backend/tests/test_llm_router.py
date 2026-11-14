@@ -43,7 +43,6 @@ def test_invalid_routes_json_falls_back(monkeypatch):
 
 @pytest.mark.anyio
 async def test_fallback_on_primary_failure(monkeypatch):
-    from app import llm
     from app.llm import router as r
 
     calls = []

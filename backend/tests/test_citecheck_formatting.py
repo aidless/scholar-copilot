@@ -1,5 +1,4 @@
 """v0.4：引用真实性核查（monkeypatch 免网络）+ 格式排版 profile。"""
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE_A = "13800000041"

@@ -1,5 +1,4 @@
 """#19 指纹链接入端到端：生成 → 改稿 → 链上有据可查（API 层，RED→GREEN）。"""
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app

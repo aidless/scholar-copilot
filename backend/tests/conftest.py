@@ -22,7 +22,6 @@ import pytest  # noqa: E402
 @pytest.fixture(autouse=True)
 def fresh_db():
     from app.db import Base, _engine_and_session
-    import app.models  # noqa: F401——注册 metadata
 
     engine, _ = _engine_and_session()
 

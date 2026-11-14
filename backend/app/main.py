@@ -10,7 +10,6 @@ from fastapi.responses import PlainTextResponse
 from .config import settings
 from .observability import configure_logging, metrics, new_request_id, request_id_var
 
-from . import tenancy
 from .routers import (admin, auth, billing, distributor, files, formatting, jobs,
                       payments, references, review, tenant, tools, writing)
 
@@ -30,7 +29,6 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         from .db import _engine_and_session
-        import app.models  # noqa: F401——注册 metadata
 
         if settings.db_auto_create:
             from .db import Base

@@ -5,7 +5,6 @@
 - 用量侧：每次 LLM 调用落一条 usage_records（tokens_in/out + 按价表折算成本）；
 - 账户侧：`accounts` 表记套餐 + 余额，订阅扣余额并落流水；用量超套餐软提示。
 """
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE_A = "13800000041"

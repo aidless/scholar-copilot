@@ -58,7 +58,6 @@ def test_parse_event_bad_xml_raises():
 
 # ── 路由层：URL 校验握手 + 事件推送推进会话 ───────────────────────────────
 
-import pytest as _pytest
 from fastapi.testclient import TestClient
 
 

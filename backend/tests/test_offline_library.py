@@ -7,7 +7,6 @@
 """
 from contextlib import contextmanager
 
-import pytest
 from fastapi.testclient import TestClient
 
 PHONE = "13910000021"
